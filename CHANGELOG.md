@@ -5,6 +5,8 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.1.1 (2026-11-13)
+
 - Building: npm no longer warns about the install scripts of four UI build tools; they are
   approved in `ui/package.json`.
 - Building: the password field no longer causes an Angular warning in the tests.
