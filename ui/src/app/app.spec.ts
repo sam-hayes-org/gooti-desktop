@@ -261,7 +261,7 @@ describe('App', () => {
     });
     const fixture = await render();
     const root = fixture.nativeElement as HTMLElement;
-    expect(text(root)).toContain('Gooti 0.2.0 is available.');
+    expect(text(root)).toContain('Gooti 0.2.0 is available. You have 0.1.0.');
     expect(text(root)).toContain('Update it with your package manager.');
     Array.from(root.querySelectorAll<HTMLButtonElement>('button'))
       .find((b) => b.textContent?.trim() === 'Release page')!

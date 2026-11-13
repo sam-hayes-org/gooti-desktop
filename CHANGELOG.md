@@ -9,6 +9,8 @@ does in full is in `README.md`.
   Unlicense).
 - Info → **Open-source licenses** shows the licenses of everything Gooti ships with. Every bundle
   carries them in `licenses/`, and the AUR package installs the MIT license where Arch expects it.
+- The side panel no longer shows the channel and version under Lock Gooti; Info shows them. When an
+  update is out, the side panel names both versions ("Gooti 0.1.2 is available. You have 0.1.1.").
 
 ## 0.1.1 (2026-11-13)
 

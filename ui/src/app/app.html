@@ -55,7 +55,7 @@
       <div class="sidebar-footer">
         @if (core.update(); as update) {
           <div class="update" role="status">
-            <span>Gooti {{ update.version }} is available.</span>
+            <span>Gooti {{ update.version }} is available. You have {{ update.currentVersion }}.</span>
             @if (update.canInstall) {
               <button type="button" class="action primary" [disabled]="installing()" (click)="installUpdate()">
                 {{ installing() ? 'Installing…' : 'Install and restart' }}
@@ -79,12 +79,6 @@
           <i class="bi bi-shield-lock"></i>
           <span>Lock Gooti</span>
         </button>
-        <span class="badge-alpha">
-          {{ core.appInfo()?.channel ?? 'alpha' }}
-          @if (core.appInfo(); as info) {
-            · {{ info.version }}
-          }
-        </span>
       </div>
     </aside>
 
