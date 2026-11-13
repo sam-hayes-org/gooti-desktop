@@ -14,7 +14,7 @@ use gooti_core::{
     VaultStatus,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::state::{AppState, VAULT_CHANGED_EVENT, emit_status};
 
@@ -702,6 +702,27 @@ pub fn open_releases<R: Runtime>(app: AppHandle<R>) -> CommandResult<()> {
             message: format!("Could not open the browser: {error}"),
             failures: Vec::new(),
         })
+}
+
+/// Info → Open-source licenses: Gooti's license and those of everything it ships with
+/// (`tools/licenses/generate.sh`). Every bundle carries the file; a debug build reads the repo's.
+#[tauri::command]
+pub fn licenses_text<R: Runtime>(app: AppHandle<R>) -> CommandResult<String> {
+    const FILE: &str = "licenses/THIRD-PARTY-NOTICES.txt";
+    let bundled = app
+        .path()
+        .resolve(FILE, tauri::path::BaseDirectory::Resource)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    #[cfg(debug_assertions)]
+    let bundled = bundled.or_else(|| {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(FILE)).ok()
+    });
+    bundled.ok_or_else(|| CommandError {
+        code: "licenses",
+        message: "The license list is missing from this installation.".into(),
+        failures: Vec::new(),
+    })
 }
 
 #[cfg(test)]

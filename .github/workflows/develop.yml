@@ -38,6 +38,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: npm test
+      # The license list every bundle carries must match the dependencies (npm run licenses).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.3
+      - name: License list is up to date
+        run: npm run licenses:check
       # Without update files, so this run needs no signing key. Signed update files come only from
       # release.yml.
       - name: Bundle

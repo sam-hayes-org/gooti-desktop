@@ -39,6 +39,7 @@ npm run build          # the same plus signed update files; needs the update key
 npm run build:windows  # the Windows installer, cross-built on Linux (see Windows below)
 npm run start:local:latest  # starts the newest AppImage from that folder (-- --which: only print it)
 npm test               # cargo test --workspace, then the UI tests
+npm run licenses       # rewrite src-tauri/licenses/THIRD-PARTY-NOTICES.txt (after a dependency change)
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
@@ -101,6 +102,11 @@ The dev app uses the real data folder `~/.local/share/com.getgooti.desktop` (vau
   `'unsafe-inline'`, so those styles were blocked (dev mode looked fine). `tauri.conf.json` therefore sets
   `dangerousDisableAssetCspModification: ["style-src"]`. Check a release build (`npm run build:local`), not only
   `npm run dev`, after touching the CSP.
+- **License list.** Every bundle carries `src-tauri/licenses/` (Gooti's MIT `LICENSE` and
+  `THIRD-PARTY-NOTICES.txt`), shown under Info → Open-source licenses. After adding, removing or
+  updating a dependency (Cargo or npm), run `npm run licenses` and commit the file; the Develop run
+  checks it (`licenses:check`). It needs `cargo-about` (`cargo install cargo-about --locked --features
+  cli`). A crate under a license not in `about.toml` stops it: look at the license, then add it.
 - **Windows test programs stopped at start** (`0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND`) on GitHub,
   while Wine passed. tauri-build links the Windows manifest (Common Controls v6) only into the app, so
   `src-tauri/build.rs` turns that off and has the linker embed `src-tauri/windows-app-manifest.xml`

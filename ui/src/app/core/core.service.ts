@@ -599,6 +599,11 @@ export class CoreService {
     return this.#call('open_releases');
   }
 
+  /** Gooti's license and those of everything it ships with, as one text. */
+  licensesText(): Promise<string> {
+    return this.#call('licenses_text');
+  }
+
   /** Opens one of the Info page's fixed links in the browser. */
   openLink(link: InfoLink): Promise<void> {
     return this.#call('open_link', { link });

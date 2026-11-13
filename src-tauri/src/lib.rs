@@ -122,6 +122,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         commands::update_install,
         commands::open_releases,
         commands::open_link,
+        commands::licenses_text,
         commands::connect_link_take,
         commands::backup_info,
         commands::backup_default_relays,

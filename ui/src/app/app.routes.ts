@@ -9,6 +9,7 @@ import { ConnectionNewPage } from './connections/connection-new.page';
 import { SettingsPage } from './settings/settings.page';
 import { BackupPage } from './backup/backup.page';
 import { InfoPage } from './info/info.page';
+import { LicensesPage } from './info/licenses.page';
 
 /** Pages inside the unlocked shell. The vault screens are not routes. */
 export const routes: Routes = [
@@ -23,5 +24,6 @@ export const routes: Routes = [
   { path: 'activity', component: ActivityPage, title: 'Activities · Gooti' },
   { path: 'settings', component: SettingsPage, title: 'Settings · Gooti' },
   { path: 'info', component: InfoPage, title: 'Info · Gooti' },
+  { path: 'info/licenses', component: LicensesPage, title: 'Open-source licenses · Gooti' },
   { path: '**', redirectTo: 'identities' },
 ];

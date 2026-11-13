@@ -43,11 +43,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../LICENSE": "licenses/LICENSE",
+      "licenses/THIRD-PARTY-NOTICES.txt": "licenses/THIRD-PARTY-NOTICES.txt"
+    },
     "createUpdaterArtifacts": true,
     "publisher": "Gooti",
     "homepage": "https://getgooti.com",
-    "copyright": "Public domain (Unlicense)",
-    "license": "Unlicense",
+    "copyright": "Copyright (c) 2026 Sam Hayes, MIT License",
+    "license": "MIT",
     "linux": {
       "deb": {
         "section": "utils",

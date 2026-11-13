@@ -545,3 +545,13 @@ fn a_clicked_link_waits_for_the_unlock_and_is_taken_once() {
     );
     assert_eq!(h.ok("connect_link_take", json!({})), Value::Null);
 }
+
+#[test]
+fn the_license_list_opens_without_unlocking() {
+    let h = Harness::new();
+    let text = h.ok("licenses_text", json!({}));
+    let text = text.as_str().expect("the list is text");
+    assert!(text.starts_with("Gooti Desktop: licenses"));
+    assert!(text.contains("MIT License\n\nCopyright (c) 2026 Sam Hayes"));
+    assert!(text.contains("Rust crates") && text.contains("@angular/core"));
+}

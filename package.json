@@ -12,11 +12,14 @@
     "start:local:latest": "tools/start-latest.sh",
     "test": "cargo test --workspace && npm --prefix ui test -- --watch=false",
     "check:windows": "tools/check-windows.sh",
+    "licenses": "tools/licenses/generate.sh",
+    "licenses:check": "tools/licenses/generate.sh --check",
     "icons": "tauri icon assets/app-icon.svg -o src-tauri/icons && rm -rf src-tauri/icons/android src-tauri/icons/ios",
     "vectors": "tools/vectors/run.sh generate crates/gooti-core/tests/vectors/extension.json",
     "vectors:check": "cargo test -p gooti-core --test extension_vectors && tools/vectors/run.sh check target/vectors/rust.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
-  }
+  },
+  "license": "MIT"
 }
