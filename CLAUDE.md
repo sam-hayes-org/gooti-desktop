@@ -9,6 +9,9 @@ Sites and apps for testing by hand are in `docs/TESTING.md`.
 relays, backup, security, shortcuts, and limitations. When a change adds, removes, or changes any of
 these, update the README in the same commit.
 
+**Keep `CHANGELOG.md` up to date.** Add each change that users or the build notice under "Unreleased",
+in the same commit. A release renames that section to the version (`docs/RELEASING.md`).
+
 ## Layout
 
 - `crates/gooti-core`: all logic that touches keys (vault, backup, bunker, permissions). It has no UI and no Tauri,
@@ -151,5 +154,6 @@ Only the tray menu, notifications and the window frame stay system.
 ## Git
 
 Work on the `beta` branch, and commit there after a verified step. Leave `main` and `develop` alone unless
-asked. GitHub runs nothing for `beta`: a push to `develop` builds test bundles, a `v*` tag on `main` builds
-a release (`docs/RELEASING.md`).
+asked. GitHub runs nothing for `beta`: a push to `develop` builds test bundles, a `v*` tag builds a
+release (`docs/RELEASING.md`). The user tags releases themselves: on `develop` before 1.0.0, on `main`
+from 1.0.0 on.

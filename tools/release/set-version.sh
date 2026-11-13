@@ -12,4 +12,4 @@ sed -i "0,/^version = \".*\"/s//version = \"$version\"/" Cargo.toml
 npm pkg set version="$version" >/dev/null
 npm install --package-lock-only --ignore-scripts --silent
 cargo update -p gooti-core -p gooti-desktop --quiet
-echo "Version $version. Next: add it to CHANGELOG.md, commit, tag v$version."
+echo "Version $version. Next: in CHANGELOG.md, rename Unreleased to $version, commit \"Release $version\" (docs/RELEASING.md)."

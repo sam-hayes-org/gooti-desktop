@@ -13,6 +13,7 @@ import { FormsModule } from '@angular/forms';
         [placeholder]="placeholder()"
         [attr.aria-label]="placeholder()"
         [(ngModel)]="value"
+        [ngModelOptions]="{ standalone: true }"
         [name]="name()"
         [attr.autofocus]="autofocus() ? '' : null"
         autocomplete="off"
