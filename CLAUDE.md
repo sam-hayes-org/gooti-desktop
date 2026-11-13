@@ -98,6 +98,10 @@ The dev app uses the real data folder `~/.local/share/com.getgooti.desktop` (vau
   `'unsafe-inline'`, so those styles were blocked (dev mode looked fine). `tauri.conf.json` therefore sets
   `dangerousDisableAssetCspModification: ["style-src"]`. Check a release build (`npm run build:local`), not only
   `npm run dev`, after touching the CSP.
+- **Windows test programs stopped at start** (`0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND`) on GitHub,
+  while Wine passed. tauri-build links the Windows manifest (Common Controls v6) only into the app, so
+  `src-tauri/build.rs` turns that off and has the linker embed `src-tauri/windows-app-manifest.xml`
+  into every MSVC binary. Wine has every function in its comctl32, so only real Windows shows this.
 
 ## Compatibility with the extension
 
