@@ -1,0 +1,38 @@
+[package]
+name = "gooti-core"
+description = "Vault, backup, bunker and permissions for Gooti. No UI, so the desktop and a later server can share it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Cheap Argon2id settings (`KdfParams::TEST`) for tests in other crates. Never in a release.
+test-util = []
+
+[dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+bip39 = "2"
+chacha20poly1305 = "0.10"
+futures-util = "0.3"
+getrandom = "0.3"
+hkdf = "0.12"
+nostr = { version = "0.45.7", default-features = false, features = ["std", "os-rng", "rand", "nip04", "nip44", "nip49"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror = "2.0.21"
+tokio = { version = "1", features = ["rt", "macros", "time", "net", "sync"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+unicode-normalization = "0.1"
+uuid = { version = "1.29.2", features = ["v4"] }
+zeroize = { version = "1.9.1", features = ["derive"] }
+
+[dev-dependencies]
+# Turns on `test-util` (fast Argon2id) for the integration tests in tests/.
+gooti-core = { path = ".", features = ["test-util"] }
+nostr = { version = "0.45.7", default-features = false, features = ["std"] }
+tempfile = "3.27.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }

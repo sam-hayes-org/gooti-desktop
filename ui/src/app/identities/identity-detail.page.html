@@ -1,0 +1,186 @@
+@if (identity(); as identity) {
+  <div class="page-inner">
+    <a class="back" routerLink="/identities"><i class="bi bi-chevron-left"></i> Identities</a>
+
+    <div class="head" [style.border-left-color]="color(identity)">
+      <app-identity-avatar [pubkey]="identity.pubkey" [color]="identity.color" [size]="48" />
+      <div class="head-text">
+        <h1 class="page-title">{{ identity.nick }}</h1>
+        <span class="mono muted">{{ identity.npub }}</span>
+      </div>
+    </div>
+
+    @if (error()) {
+      <p class="sam-error" role="alert">{{ error() }}</p>
+    }
+
+    <section class="group">
+      <p class="kicker">Nick</p>
+      <form class="inline" (submit)="$event.preventDefault(); saveNick()">
+        <div class="sam-field grow">
+          <input type="text" name="nick" aria-label="Nick" autocomplete="off" [(ngModel)]="nick" />
+        </div>
+        <button type="submit" class="action primary" [disabled]="!nickChanged() || busy()">Save</button>
+      </form>
+    </section>
+
+    <section class="group">
+      <p class="kicker">Color</p>
+      <div class="inline">
+        <input
+          type="color"
+          class="swatch"
+          aria-label="Color"
+          [value]="color(identity)"
+          (change)="setColor($any($event.target).value)"
+        />
+        <span class="copy">Pick a color to change it.</span>
+      </div>
+    </section>
+
+    <section class="group">
+      <p class="kicker">Keys</p>
+      <p class="field-label">Public key</p>
+      <div class="sam-field">
+        <input type="text" class="mono" aria-label="Public key (npub)" readonly [value]="identity.npub" />
+        <app-copy-button [text]="identity.npub" />
+      </div>
+      <div class="sam-field">
+        <input type="text" class="mono" aria-label="Public key (hex)" readonly [value]="identity.pubkey" />
+        <app-copy-button [text]="identity.pubkey" />
+      </div>
+
+      @if (identity.keyMissing) {
+        <p class="copy sam-mt-h key-missing" role="note">
+          <i class="bi bi-exclamation-triangle"></i>
+          No Gooti Desktop with your passphrase holds the private key, so no device can sign for this
+          identity. The key is lost, unless you saved its nsec.
+        </p>
+      } @else if (identity.isBunker) {
+        <p class="copy sam-mt-h">
+          A browser links this identity to a bunker. The private key stays in that bunker, so this desktop
+          cannot sign with it.
+        </p>
+      }
+      @if (identity.hasPrivateKey) {
+        <p class="field-label sam-mt-h">Private key</p>
+        @if (nsec(); as nsec) {
+          <div class="sam-field">
+            <input type="text" class="mono" aria-label="Private key (nsec)" readonly [value]="nsec" />
+            <app-copy-button [text]="nsec" />
+            <button type="button" class="icon" aria-label="Hide private key" (click)="hideNsec()">
+              <i class="bi bi-eye-slash"></i>
+            </button>
+          </div>
+          <p class="copy">Anyone with this key can sign as this identity.</p>
+        } @else {
+          <div class="sam-field">
+            <input type="text" aria-label="Private key hidden" readonly value="••••••••••••••••" />
+            <button type="button" class="icon" aria-label="Show private key" (click)="showNsec()">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        }
+      }
+    </section>
+
+    @if (identity.servedElsewhere) {
+      <section class="group served-elsewhere">
+        <p class="kicker">Signing</p>
+        <p class="copy">
+          Another Gooti Desktop answers apps and browsers for this identity. This desktop holds the key
+          too. If that desktop was this computer before a reset, or you no longer use it, sign here.
+        </p>
+        <button type="button" class="action quiet align-start" [disabled]="busy()" (click)="serveHere()">
+          Sign here instead
+        </button>
+      </section>
+    }
+
+    @if (identity.hasPrivateKey) {
+      <section class="group">
+        <p class="kicker">Where the key is used</p>
+        @if (identity.custody === 'desktop') {
+          <p class="custody"><i class="bi bi-pc-display"></i> Desktop only</p>
+          <p class="copy">
+            Browsers never get this private key. They sign through Gooti Desktop while it is unlocked. Your
+            backup keeps the key for your Gooti Desktops only. Sites send their requests straight to the
+            desktop, and it decides each one.
+          </p>
+          <button type="button" class="action quiet align-start" [disabled]="busy()" (click)="useInBrowsers()">
+            Use in browsers again
+          </button>
+        } @else {
+          <p class="custody"><i class="bi bi-arrow-repeat"></i> Browsers and desktops</p>
+          <p class="copy">
+            With backup on, every browser and desktop with your passphrase holds this private key.
+          </p>
+          @if (moving()) {
+            <div class="sam-card move-card">
+              <p class="copy">
+                Your browsers drop their copy at their next backup and sign through this desktop instead.
+                Copies made before, such as exports or old backups, are not deleted.
+              </p>
+              <label class="field-label" for="browserRelays">Relays for your browsers</label>
+              <p class="copy">Browsers will reach this desktop through these relays. One relay per line.</p>
+              <textarea
+                id="browserRelays"
+                class="sam-box"
+                rows="3"
+                name="browserRelays"
+                [ngModel]="relaysText()"
+                (ngModelChange)="relaysText.set($event)"
+              ></textarea>
+              <div class="form-actions">
+                <button type="button" class="action quiet" (click)="moving.set(false)">Cancel</button>
+                <button type="button" class="action primary" [disabled]="busy()" (click)="moveToDesktop()">
+                  Move key
+                </button>
+              </div>
+            </div>
+          } @else {
+            <button type="button" class="action quiet align-start" [disabled]="busy()" (click)="startMove()">
+              Move key to desktop
+            </button>
+          }
+        }
+      </section>
+
+      <section class="group">
+        <p class="kicker">Export</p>
+        <p class="copy">
+          An ncryptsec is this private key, locked with a password you choose. Other Nostr apps can import it.
+        </p>
+        <form class="inline" (submit)="$event.preventDefault(); exportKey()">
+          <div class="sam-field grow">
+            <input
+              type="password"
+              name="exportPassword"
+              placeholder="Password for the ncryptsec"
+              aria-label="Password for the ncryptsec"
+              autocomplete="new-password"
+              [(ngModel)]="exportPassword"
+            />
+          </div>
+          <button type="submit" class="action quiet" [disabled]="!exportPassword() || busy()">
+            Export ncryptsec
+          </button>
+        </form>
+        @if (exportError()) {
+          <p class="sam-error" role="alert">{{ exportError() }}</p>
+        }
+        @if (exported(); as exported) {
+          <div class="sam-field">
+            <input type="text" class="mono" aria-label="ncryptsec" readonly [value]="exported" />
+            <app-copy-button [text]="exported" />
+          </div>
+        }
+      </section>
+    }
+
+    <section class="group">
+      <p class="kicker danger">Danger zone</p>
+      <button type="button" class="action danger" (click)="delete()">Delete identity</button>
+    </section>
+  </div>
+}

@@ -1,0 +1,46 @@
+.connect-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.select {
+  min-width: 200px;
+}
+
+.link-card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.link-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .sam-field {
+    background: var(--background);
+  }
+
+  input.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+}
+
+.align-start {
+  align-self: flex-start;
+}
+
+
+.from-link {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(13, 110, 253, 0.14);
+  color: #c5dbff;
+  font-size: 14px;
+}

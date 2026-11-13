@@ -1,0 +1,95 @@
+name: Develop
+
+# Every push to develop: tests, then Linux bundles and the Windows installer to download from the
+# run's page (Artifacts).
+# Nothing else starts a run here: not main (release.yml builds the v* tags), not beta or feature
+# branches, not pull requests.
+on:
+  push:
+    branches: [develop]
+
+# A newer push replaces a run that is still going.
+concurrency:
+  group: develop
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        timeout-minutes: 15
+        run: tools/ci/apt-install.sh libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - run: npm ci
+      - run: npm --prefix ui run build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm test
+      # Without update files, so this run needs no signing key. Signed update files come only from
+      # release.yml.
+      - name: Bundle
+        run: npx tauri build --bundles deb,appimage --config src-tauri/tauri.local.conf.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gooti-desktop-linux-${{ github.sha }}
+          retention-days: 14
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+
+  # Tests on Windows, then the installer (without update files) to download from the run's page.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - run: npm ci
+      - run: npm --prefix ui run build
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm test
+      - name: Bundle
+        run: npx tauri build --config src-tauri/tauri.local.conf.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gooti-desktop-windows-${{ github.sha }}
+          retention-days: 14
+          path: target/release/bundle/nsis/*.exe
+
+  # No releases for Mac yet. This only catches code that does not compile there.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm --prefix ui run build
+      - run: cargo check --workspace --all-targets

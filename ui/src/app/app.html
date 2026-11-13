@@ -1,0 +1,99 @@
+@if (core.isApprovalWindow()) {
+  @if (core.status() === 'unlocked') {
+    <app-approval-panel class="full" />
+  }
+} @else {
+@if (backupBar()) {
+  <div class="backup-bar" role="progressbar" aria-label="Backing up"></div>
+}
+@switch (core.status()) {
+  @case ('noVault') {
+    <app-vault-start class="full" />
+  }
+  @case ('locked') {
+    <app-vault-unlock class="full" />
+  }
+  @case ('unlocked') {
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="gooti.svg" alt="" width="32" height="32" />
+        <span>Gooti</span>
+      </div>
+
+      <nav>
+        @for (item of navItems; track item.path) {
+          <a
+            class="nav-link"
+            [routerLink]="item.path"
+            routerLinkActive="active"
+            [attr.data-nav]="item.path"
+          >
+            <i class="bi" [class]="'bi-' + item.icon"></i>
+            <span class="label">{{ item.label }}</span>
+            <span class="extras">
+              @if (item.path === 'identities') {
+                <span class="total" aria-label="Identities">{{ core.identities().length }}</span>
+              }
+              @if (item.path === 'connections') {
+                <!-- A waiting request is more urgent than the number of apps, and the row is short. -->
+                @if (core.pendingAsks().length) {
+                  <span class="count" aria-label="Requests waiting">{{ core.pendingAsks().length }}</span>
+                } @else if (connectionCount() !== null) {
+                  <span class="total" aria-label="Apps">{{ connectionCount() }}</span>
+                }
+                @if (relays(); as relays) {
+                  <span class="relays" [attr.data-tone]="relays.tone" [appTooltip]="relays.hint">
+                    <i class="dot" aria-hidden="true"></i>{{ relays.label }}
+                  </span>
+                }
+              }
+            </span>
+          </a>
+        }
+      </nav>
+
+      <div class="sidebar-footer">
+        @if (core.update(); as update) {
+          <div class="update" role="status">
+            <span>Gooti {{ update.version }} is available.</span>
+            @if (update.canInstall) {
+              <button type="button" class="action primary" [disabled]="installing()" (click)="installUpdate()">
+                {{ installing() ? 'Installing…' : 'Install and restart' }}
+              </button>
+            } @else {
+              <span class="copy">Update it with your package manager.</span>
+              <button type="button" class="sam-text-link" (click)="core.openReleases()">Release page</button>
+            }
+            @if (updateError()) {
+              <span class="sam-error">{{ updateError() }}</span>
+            }
+          </div>
+        }
+        <button
+          type="button"
+          class="lock"
+          data-action="lock"
+          [appTooltip]="lockHint"
+          (click)="lock()"
+        >
+          <i class="bi bi-shield-lock"></i>
+          <span>Lock Gooti</span>
+        </button>
+        <span class="badge-alpha">
+          {{ core.appInfo()?.channel ?? 'alpha' }}
+          @if (core.appInfo(); as info) {
+            · {{ info.version }}
+          }
+        </span>
+      </div>
+    </aside>
+
+    <main class="content">
+      <router-outlet />
+    </main>
+  }
+}
+
+}
+<app-confirm-dialog />
+<app-text-menu />

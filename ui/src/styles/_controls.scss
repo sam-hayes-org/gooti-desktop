@@ -1,0 +1,127 @@
+// Gooti draws every control itself, so the app looks the same on Linux, Mac and Windows.
+// The system draws none of them: drop-down lists, tooltips and the right-click menu are
+// components in app/shared, and the rest is styled here.
+
+:root {
+  // Anything the engine still draws on its own (autofill, date pickers) is dark.
+  color-scheme: dark;
+}
+
+// Keyboard focus: the same ring everywhere instead of the engine's own. :where() keeps it weak, so a
+// component's own focus style wins.
+:where(:focus-visible) {
+  outline: 2px solid rgba(13, 110, 253, 0.7);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(13, 110, 253, 0.45);
+  color: #ffffff;
+}
+
+input,
+textarea {
+  caret-color: #ffffff;
+}
+
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+// Checkboxes and radio buttons.
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid var(--border);
+  background: var(--background-light) no-repeat center;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--muted);
+  }
+
+  &:checked {
+    border-color: var(--primary);
+    background-color: var(--primary);
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.35);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+}
+
+input[type='checkbox'] {
+  border-radius: 5px;
+
+  &:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.2' d='m3.5 8.5 3 3 6-7'/%3E%3C/svg%3E");
+    background-size: 14px;
+  }
+}
+
+input[type='radio'] {
+  border-radius: 50%;
+
+  &:checked {
+    background-image: radial-gradient(circle, #ffffff 0 3.5px, transparent 4px);
+  }
+}
+
+// The engine's extras in text fields.
+input::-ms-reveal,
+input::-ms-clear,
+input::-webkit-caps-lock-indicator,
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-contacts-auto-fill-button,
+input::-webkit-search-cancel-button,
+input::-webkit-inner-spin-button,
+input::-webkit-outer-spin-button {
+  display: none !important;
+  visibility: hidden;
+  -webkit-appearance: none;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #ffffff;
+  box-shadow: 0 0 0 1000px var(--background-light) inset;
+}
+
+// Scrollbars: thin, dark, the same in WebKit (Linux, Mac) and WebView2 (Windows).
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.16) padding-box;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+  }
+}

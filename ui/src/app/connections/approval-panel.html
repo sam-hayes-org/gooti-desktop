@@ -1,0 +1,96 @@
+<div class="panel">
+  <div class="brand">
+    <img src="gooti.svg" width="18" height="18" alt="" />
+    <span>Gooti</span>
+  </div>
+
+  @if (ask(); as ask) {
+    <h1>{{ title() }}</h1>
+    <div class="who">
+      <span class="app">{{ ask.details.site ?? appName() }}</span>
+      <span class="copy">
+        @if (ask.details.site) {
+          through {{ appName() }}
+        }
+        wants to use <strong>{{ identityNick() }}</strong>
+      </span>
+    </div>
+
+    <div class="body">
+      @if (ask.method === 'sign_event') {
+        <p class="field-label">{{ kindLabel() }}</p>
+        @if (ask.details.content) {
+          <pre class="content">{{ ask.details.content }}</pre>
+        } @else {
+          <p class="copy">No text.</p>
+        }
+        @if (ask.details.tags.length) {
+          <p class="field-label">Tags</p>
+          <ul class="tags">
+            @for (tag of ask.details.tags; track $index) {
+              <li class="mono">{{ tag.join(' · ') }}</li>
+            }
+          </ul>
+        }
+        @if (futureDated()) {
+          <p class="warning" role="alert">
+            This event is dated {{ dated() }}, in the future. It would stay at the top of feeds.
+          </p>
+        }
+      } @else {
+        <p class="field-label">With</p>
+        <p class="mono peer">{{ ask.details.peer }}</p>
+        @if (ask.details.content) {
+          <pre class="content">{{ ask.details.content }}</pre>
+        }
+      }
+    </div>
+
+    <div class="remember">
+      <label class="field-label" for="remember">Remember</label>
+      <app-select
+        inputId="remember"
+        [options]="rememberOptions()"
+        [ngModel]="remember()"
+        (ngModelChange)="remember.set($event)"
+      />
+    </div>
+    @if (sensitive()) {
+      <p class="copy">This kind changes your profile, lists, or sign-ins. Gooti remembers it for an hour at most.</p>
+    }
+
+    @if (error()) {
+      <p class="sam-error" role="alert">{{ error() }}</p>
+    }
+
+    <div class="buttons">
+      <button
+        type="button"
+        class="action quiet"
+        [disabled]="busy()"
+        [appTooltip]="mod + '+Shift+Enter'"
+        (click)="decide(false)"
+      >
+        Reject
+      </button>
+      <button
+        type="button"
+        class="action primary"
+        [disabled]="busy()"
+        [appTooltip]="mod + '+Enter'"
+        (click)="decide(true)"
+      >
+        Approve
+      </button>
+    </div>
+    @if (waiting() > 1) {
+      <p class="copy waiting">{{ waiting() - 1 }} more waiting.</p>
+    }
+  } @else {
+    <h1>Nothing waits</h1>
+    <p class="copy">The app's request was answered or timed out.</p>
+    <div class="buttons">
+      <button type="button" class="action quiet" (click)="close()">Close</button>
+    </div>
+  }
+</div>

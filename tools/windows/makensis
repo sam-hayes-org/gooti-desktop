@@ -1,0 +1,20 @@
+#!/bin/bash
+# Stands in for makensis while tools/build-windows.sh runs: the official NSIS for Windows under Wine.
+# The Arch package (AUR nsis) builds 64-bit installers only, but Tauri's installer script and its
+# nsis_tauri_utils plugin are 32-bit (x86-unicode). Linux paths become Wine paths (Z:\...), in the
+# arguments and in the script Tauri generates (NSIS for Windows takes "/home/..." as relative).
+set -euo pipefail
+: "${GOOTI_NSIS_DIR:?set by tools/build-windows.sh}"
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == *.nsi && -f "$arg" ]]; then
+    # "/existing/path" -> "Z:\existing\path"; other strings that start with / (switches) stay.
+    perl -pi -e 's{"(/[^"]+)"}{ my $p = $1; (-e $p || -e ($p =~ s{/[^/]*$}{}r)) ? "\"Z:" . ($p =~ tr{/}{\\}r) . "\"" : "\"$p\"" }ge' "$arg"
+  fi
+  if [[ "$arg" == /* && -e "$arg" ]]; then
+    args+=("$(winepath -w "$arg" 2>/dev/null)")
+  else
+    args+=("$arg")
+  fi
+done
+exec wine "$GOOTI_NSIS_DIR/makensis.exe" "${args[@]}"

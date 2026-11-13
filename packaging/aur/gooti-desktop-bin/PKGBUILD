@@ -1,0 +1,19 @@
+# Maintainer: Gooti <https://getgooti.com>
+# Built from the .deb of the GitHub release. Update with packaging/aur/update.sh <version>.
+pkgname=gooti-desktop-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Nostr identity vault and bunker"
+arch=('x86_64')
+url="https://github.com/sam-hayes-org/gooti-desktop"
+license=('Unlicense')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsecret')
+optdepends=('libayatana-appindicator: tray icon')
+provides=('gooti-desktop')
+conflicts=('gooti-desktop')
+source=("Gooti_${pkgver}_amd64.deb::${url}/releases/download/v${pkgver}/Gooti_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf data.tar.gz -C "$pkgdir"
+}

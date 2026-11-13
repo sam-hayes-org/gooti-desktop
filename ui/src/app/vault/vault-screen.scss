@@ -1,0 +1,209 @@
+// The extension's vault screens (vault-login, vault-create/home), centered in the wide window.
+
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow-y: auto;
+  background: #0c1016;
+}
+
+.decision {
+  width: min(440px, 100%);
+  box-sizing: border-box;
+  padding: 32px 28px 24px;
+  border-radius: 18px;
+  background: var(--background);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+
+  img {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+}
+
+.brand.large {
+  flex-direction: column;
+  gap: 12px;
+  color: #e8edf5;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  line-height: 1;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  box-sizing: border-box;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+
+  img {
+    width: 76px;
+    height: 76px;
+  }
+}
+
+.body {
+  padding: 28px 2px 0;
+}
+
+h1 {
+  margin: 6px 0 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  margin-top: 22px;
+  padding-right: 4px;
+  border-radius: 12px;
+  background: var(--background-light);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #ffffff;
+  padding: 0 14px;
+  font: inherit;
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+.eye {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.eye:hover {
+  color: #ffffff;
+}
+
+.error {
+  margin: 8px 0 0;
+  color: #f0a8a8;
+  font-size: 13px;
+}
+
+.submit {
+  width: 100%;
+  height: 44px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.quiet,
+.reset {
+  margin-top: 18px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.quiet:hover,
+.reset:hover {
+  color: #ffffff;
+}
+
+.choice {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--background-light);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choice:first-of-type {
+  margin-top: 22px;
+}
+
+.choice strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8edf5;
+}
+
+.choice span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.choice:hover {
+  filter: brightness(1.08);
+}

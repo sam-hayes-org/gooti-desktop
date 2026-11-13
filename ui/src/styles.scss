@@ -1,0 +1,49 @@
+@use "sass:meta";
+
+@include meta.load-css("bootstrap/scss/bootstrap");
+@include meta.load-css("bootstrap-icons/font/bootstrap-icons.min.css");
+@include meta.load-css("@fontsource-variable/inter/wght.css");
+
+// Same tokens and Inter font as the extension (gooti-extension/projects/common/src/lib/styles/styles.scss).
+// After Bootstrap: its own :root sets --bs-body-font-family too, and the later rule wins.
+:root {
+  --size-2: 32px;
+  --size: 16px;
+  --size-h: 8px;
+  --size-hh: 4px;
+
+  --background: #161c26;
+  --background-light: #202733;
+  --background-light-hover: #383844;
+  --border: #525b6a;
+  --primary: #0d6efd;
+
+  // Desktop only: the sidebar sits one step darker than the page.
+  --sidebar: #11161e;
+  --muted: #9aa3b2;
+
+  --bs-body-font-family: "Inter Variable", var(--bs-font-sans-serif);
+}
+
+@include meta.load-css("styles/gooti/flex");
+@include meta.load-css("styles/gooti/common");
+@include meta.load-css("styles/gooti/typography");
+@include meta.load-css("styles/gooti/spacing");
+@include meta.load-css("styles/gooti/color");
+@include meta.load-css("@angular/cdk/overlay-prebuilt");
+@include meta.load-css("styles/desktop");
+@include meta.load-css("styles/controls");
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  color: #ffffff;
+  font-size: 16px;
+  background: var(--background);
+  margin: 0;
+  overflow: hidden;
+  user-select: none;
+}

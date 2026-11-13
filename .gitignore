@@ -1,0 +1,21 @@
+# Rust
+/target
+
+# Tauri
+/src-tauri/gen
+
+# Node
+node_modules/
+npm-debug.log
+
+# Angular
+/ui/dist
+/ui/.angular
+/ui/coverage
+
+# Editors and systems
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

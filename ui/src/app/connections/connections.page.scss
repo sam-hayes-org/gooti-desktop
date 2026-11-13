@@ -1,0 +1,111 @@
+.group {
+  margin-top: 10px;
+}
+
+.notice {
+  margin: 0;
+  color: #b6e3c4;
+  font-size: 14px;
+}
+
+.paused {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(240, 168, 168, 0.12);
+  color: #f0a8a8;
+  font-size: 14px;
+}
+
+.app-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-name {
+  font-weight: 600;
+}
+
+.relay-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+
+  .relay-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: #e3c46a;
+    flex: none;
+  }
+
+  &[data-state='connected'] .dot {
+    background: #4cc38a;
+  }
+
+  &[data-state='failed'] .dot {
+    background: #f0a8a8;
+  }
+}
+
+.app-link {
+  color: inherit;
+  text-decoration: none;
+
+  &:hover .app-name {
+    color: #c5dbff;
+  }
+
+  .bi {
+    font-size: 12px;
+    color: var(--muted);
+  }
+}
+
+.row-buttons {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.align-start {
+  align-self: flex-start;
+}
+
+.elsewhere {
+  color: #f0c36d;
+
+  .bi {
+    margin-right: 2px;
+  }
+}

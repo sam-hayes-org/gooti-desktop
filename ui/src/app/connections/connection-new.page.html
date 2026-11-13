@@ -1,0 +1,96 @@
+<div class="page-inner">
+  <h1 class="page-title">Connect new app</h1>
+  <p class="copy">
+    Give a new app access to one identity. It then appears under Apps in Connections, where you set how much it
+    may do.
+  </p>
+
+  @if (signable().length === 0) {
+    <div class="sam-card empty-card">
+      <p class="title">No identity to connect</p>
+      <p class="copy">Create or import an identity with a private key first.</p>
+    </div>
+  } @else {
+    <div class="connect-row">
+      <label class="field-label" for="identity">Sign as</label>
+      <app-select
+        inputId="identity"
+        class="select"
+        [options]="identityOptions()"
+        [ngModel]="identityId()"
+        (ngModelChange)="identityId.set($event); link.set(''); mode.set(null)"
+      />
+    </div>
+    <section class="group">
+      <label class="field-label" for="linkRelays">Relays for the link</label>
+      <p class="copy">
+        The app will reach this desktop through these relays. One relay per line.
+      </p>
+      <textarea
+        id="linkRelays"
+        class="sam-box"
+        rows="3"
+        name="linkRelays"
+        [ngModel]="relaysText()"
+        (ngModelChange)="relaysText.set($event); link.set(''); mode.set(mode() === 'link' ? null : mode())"
+      ></textarea>
+    </section>
+    <div class="form-actions">
+      <button type="button" class="action primary" [disabled]="busy()" (click)="showLink()">
+        <i class="bi bi-qr-code"></i> Show bunker link
+      </button>
+      <button type="button" class="action quiet" [disabled]="busy()" (click)="showPaste()">
+        Paste nostrconnect link
+      </button>
+    </div>
+
+    @if (mode() === 'link' && link()) {
+      <div class="sam-card link-card">
+        <app-qr-code [text]="link()" label="Bunker link as a QR code" />
+        <div class="link-text">
+          <p class="copy">
+            Scan this code or paste the link into the app. The link works once, for one hour. This page
+            goes back to Connections once the app connects.
+          </p>
+          <div class="sam-field">
+            <input type="text" class="mono" aria-label="Bunker link" readonly [value]="link()" />
+            <app-copy-button [text]="link()" />
+          </div>
+        </div>
+      </div>
+    }
+    @if (mode() === 'paste') {
+      @if (fromLink()) {
+        <p class="from-link" role="status">
+          <i class="bi bi-link-45deg"></i> An app sent this link. Choose the identity above, then press Connect.
+        </p>
+      }
+      <p class="copy">A nostrconnect link names its own relays. The list above is for bunker links only.</p>
+      <textarea
+        class="sam-box"
+        rows="3"
+        name="nostrconnect"
+        placeholder="nostrconnect://…"
+        aria-label="nostrconnect link"
+        [ngModel]="pasted()"
+        (ngModelChange)="pasted.set($event)"
+      ></textarea>
+      <button
+        type="button"
+        class="action primary align-start"
+        [disabled]="busy() || !pasted().trim()"
+        (click)="connect()"
+      >
+        Connect
+      </button>
+    }
+  }
+
+  @if (error()) {
+    <p class="sam-error" role="alert">{{ error() }}</p>
+  }
+
+  <div class="form-actions">
+    <button type="button" class="action quiet" (click)="back()">Cancel</button>
+  </div>
+</div>
