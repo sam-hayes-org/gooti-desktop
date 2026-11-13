@@ -55,15 +55,19 @@ Pull requests start nothing.
 Releases before 1.0.0 are tagged on `develop`. From 1.0.0 on, `develop` is merged into `main` and
 the releases are tagged there. Below, "the release branch" is `develop` before 1.0.0 and `main` after.
 
-1. Merge the work into `develop`, push, and test the bundles from the Develop run. From 1.0.0 on, then
-   merge `develop` into `main`. On the release branch, with every check in `CLAUDE.md` passing:
+1. On `beta`, once everything for the version is in, make the release commit, with every check in
+   `CLAUDE.md` passing:
 
    ```
    tools/release/set-version.sh 0.2.0
    ```
 
-   This sets the version in `Cargo.toml` (the app version), `package.json` and the lock files.
-2. Add the version to `CHANGELOG.md`, commit, and tag:
+   This sets the version in `Cargo.toml` (the app version), `package.json` and the lock files. In
+   `CHANGELOG.md`, rename "Unreleased" to "0.2.0 (date)" and start a new, empty "Unreleased" above it.
+   Commit both as "Release 0.2.0". The bump is the last commit on `beta`, so `beta`, `develop` and
+   later `main` carry the same version and nothing has to be merged back.
+2. Merge `beta` into `develop` (`git merge --no-ff beta`), push, and test the bundles from the Develop
+   run. From 1.0.0 on, then merge `develop` into `main`. Tag the release branch and push:
 
    ```
    git tag v0.2.0

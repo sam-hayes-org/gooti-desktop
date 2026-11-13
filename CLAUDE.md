@@ -9,6 +9,9 @@ Sites and apps for testing by hand are in `docs/TESTING.md`.
 relays, backup, security, shortcuts, and limitations. When a change adds, removes, or changes any of
 these, update the README in the same commit.
 
+**Keep `CHANGELOG.md` up to date.** Add each change that users or the build notice under "Unreleased",
+in the same commit. A release renames that section to the version (`docs/RELEASING.md`).
+
 ## Layout
 
 - `crates/gooti-core`: all logic that touches keys (vault, backup, bunker, permissions). It has no UI and no Tauri,
