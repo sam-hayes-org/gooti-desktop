@@ -4,6 +4,7 @@ description = "Vault, backup, bunker and permissions for Gooti. No UI, so the de
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [features]
 # Cheap Argon2id settings (`KdfParams::TEST`) for tests in other crates. Never in a release.
