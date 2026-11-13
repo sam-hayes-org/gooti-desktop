@@ -1,0 +1,21 @@
+{
+  "name": "gooti-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix ui ci",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:local": "tauri build --config src-tauri/tauri.local.conf.json",
+    "build:windows": "tools/build-windows.sh",
+    "start:local:latest": "tools/start-latest.sh",
+    "test": "cargo test --workspace && npm --prefix ui test -- --watch=false",
+    "check:windows": "tools/check-windows.sh",
+    "icons": "tauri icon assets/app-icon.svg -o src-tauri/icons && rm -rf src-tauri/icons/android src-tauri/icons/ios",
+    "vectors": "tools/vectors/run.sh generate crates/gooti-core/tests/vectors/extension.json",
+    "vectors:check": "cargo test -p gooti-core --test extension_vectors && tools/vectors/run.sh check target/vectors/rust.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

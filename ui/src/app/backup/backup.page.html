@@ -1,0 +1,250 @@
+<div class="page-inner">
+  <h1 class="page-title">Backup</h1>
+  <p class="copy">
+    Gooti keeps an encrypted backup of your identities on your relays. Your passphrase locks and unlocks
+    it. Enter the same passphrase in Gooti on a browser or on another Gooti Desktop, and they share your identities.
+  </p>
+
+  @if (notice()) {
+    <p class="notice" role="status">{{ notice() }}</p>
+  }
+  @if (error() && dialog().kind === 'none') {
+    <p class="sam-error" role="alert">{{ error() }}</p>
+    @for (failure of failures(); track failure.url) {
+      <p class="relay-failure"><span class="url">{{ failure.url }}</span> {{ failure.reason }}</p>
+    }
+  }
+
+  @if (info() === null) {
+    <section class="group">
+      <p class="kicker">Backup is off</p>
+      <div class="sam-card empty-card">
+        <p class="title">Back up your identities</p>
+        <p class="copy">
+          Create a passphrase, or use the passphrase you made in the browser extension.
+        </p>
+        <div class="form-actions">
+          <button type="button" class="action primary" [disabled]="busy()" (click)="createPassphrase()">
+            Create passphrase
+          </button>
+          <button type="button" class="action quiet" [disabled]="busy()" (click)="openRestore()">
+            Use an existing backup
+          </button>
+        </div>
+      </div>
+    </section>
+  }
+
+  @if (info(); as info) {
+    <section class="group">
+      <p class="kicker">Backup</p>
+      <div class="meter">
+        <p class="field-label">Backup size</p>
+        <div class="meter-readout">
+          <span class="used" [class.over]="vaultOver()">{{ vaultUsed() }}</span>
+          <span class="room">of 1 MB</span>
+        </div>
+        <div
+          class="track"
+          role="meter"
+          [attr.aria-valuenow]="info.contentChars"
+          aria-valuemin="0"
+          aria-valuemax="1000000"
+          [attr.aria-valuetext]="vaultUsed() + ' of 1 MB'"
+        >
+          <div class="fill" [class.over]="vaultOver()" [style.width.%]="vaultPercent()"></div>
+        </div>
+        @if (vaultOver()) {
+          <p class="copy over">A backup cannot be larger than 1 MB.</p>
+        }
+      </div>
+
+      <button type="button" class="action primary backup-now" [disabled]="busy()" (click)="backUpNow()">
+        <i class="bi bi-arrow-repeat"></i> Back up now
+      </button>
+
+      <label class="choice-row sam-mt-h">
+        <input
+          type="checkbox"
+          name="autoBackup"
+          [checked]="info.autoBackup"
+          [disabled]="busy()"
+          (change)="setAutoBackup($any($event.target))"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Back up automatically</span>
+          <span class="copy">
+            Gooti backs up when you unlock it, after each change on this desktop, and every 5 minutes,
+            and takes in changes from your other devices. Back up now does the same at once. With this off, Gooti backs up only
+            when you press Back up now.
+          </span>
+        </span>
+      </label>
+      @if (lastAuto()) {
+        <p class="copy">{{ lastAuto() }}</p>
+      }
+    </section>
+
+    <section class="group">
+      <p class="kicker">Relays</p>
+      <textarea
+        class="sam-box relays"
+        rows="3"
+        aria-label="Relays"
+        name="relays"
+        [ngModel]="relaysText()"
+        (ngModelChange)="relaysText.set($event)"
+      ></textarea>
+      <p class="copy">One relay per line.</p>
+      <button type="button" class="action quiet" [disabled]="busy()" (click)="saveRelays()">
+        Save relays
+      </button>
+    </section>
+
+    <section class="group">
+      <p class="kicker danger">Danger zone</p>
+      <p class="copy">Your identities stay on this desktop. The backup on the relays stays as it is.</p>
+      <button type="button" class="action danger" [disabled]="busy()" (click)="turnOff()">
+        Turn off backup
+      </button>
+    </section>
+  }
+</div>
+
+@switch (dialog().kind) {
+  @case ('phrase') {
+    <app-dialog title="Your passphrase" [dismissable]="!busy()" (closed)="closeDialog()">
+      <p class="copy">
+        These 12 words open your backup on Nostr relays. Anyone who has them can take every identity in it.
+        Write them down and keep them safe. Without them you cannot restore your identities on another
+        device, and nobody can recover them for you. They are different from your Gooti password.
+      </p>
+      @if (dialog(); as d) {
+        @if (d.kind === 'phrase') {
+          <div class="phrase-line">
+            <span class="phrase" data-phrase>{{ d.phrase }}</span>
+            <div class="sam-field copy-field"><app-copy-button [text]="d.phrase" /></div>
+          </div>
+        }
+      }
+      <p class="field-label">Relays</p>
+      <textarea
+        class="sam-box"
+        rows="2"
+        aria-label="Relays"
+        name="phraseRelays"
+        [ngModel]="relaysText()"
+        (ngModelChange)="relaysText.set($event)"
+      ></textarea>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="savedWords"
+          [checked]="savedWords()"
+          (change)="savedWords.set($any($event.target).checked)"
+        />
+        <span class="choice-label">I have written these words down</span>
+      </label>
+      @if (error()) {
+        <p class="sam-error" role="alert">{{ error() }}</p>
+      }
+      <ng-container buttons>
+        <button type="button" class="action quiet" [disabled]="busy()" (click)="closeDialog()">Cancel</button>
+        <button
+          type="button"
+          class="action primary"
+          [disabled]="busy() || !savedWords()"
+          (click)="turnOn($any(dialog()).phrase)"
+        >
+          Turn on backup
+        </button>
+      </ng-container>
+    </app-dialog>
+  }
+  @case ('restore') {
+    <app-dialog title="Use an existing backup" [dismissable]="!busy()" (closed)="closeDialog()">
+      <p class="copy">
+        Enter the 12 words you wrote down when you turned on backup. The backup is merged with the
+        identities on this desktop.
+      </p>
+      <p class="field-label">Relays</p>
+      <textarea
+        class="sam-box"
+        rows="2"
+        aria-label="Relays"
+        name="restoreRelays"
+        [ngModel]="relaysText()"
+        (ngModelChange)="relaysText.set($event)"
+      ></textarea>
+      <textarea
+        class="sam-box"
+        rows="3"
+        placeholder="12 words"
+        aria-label="12 words"
+        name="phrase"
+        autocomplete="off"
+        [ngModel]="phraseInput()"
+        (ngModelChange)="phraseInput.set($event)"
+      ></textarea>
+      @if (error()) {
+        <p class="sam-error" role="alert">{{ error() }}</p>
+        @for (failure of failures(); track failure.url) {
+          <p class="relay-failure"><span class="url">{{ failure.url }}</span> {{ failure.reason }}</p>
+        }
+      }
+      <ng-container buttons>
+        <button type="button" class="action quiet" [disabled]="busy()" (click)="closeDialog()">Cancel</button>
+        <button
+          type="button"
+          class="action primary"
+          [disabled]="busy() || !phraseInput().trim()"
+          (click)="restore()"
+        >
+          {{ busy() ? 'Restoring…' : 'Restore from backup' }}
+        </button>
+      </ng-container>
+    </app-dialog>
+  }
+  @case ('run') {
+    @if (dialog(); as d) {
+      @if (d.kind === 'run') {
+        <app-dialog title="Back up now" [dismissable]="!d.running" (closed)="closeDialog()">
+          @if (d.running) {
+            <p class="backup-step" role="status">
+              <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+              Reading the backup from the relays, merging it with this desktop, and sending it back.
+            </p>
+          } @else if (d.outcome) {
+            <p class="backup-step"><i class="bi bi-check2"></i> {{ resultText[d.outcome.result] }}</p>
+            @if (d.outcome.took.length) {
+              <p class="field-label">On this desktop</p>
+              <ul class="changes">
+                @for (line of d.outcome.took; track $index) {
+                  <li>{{ line }}</li>
+                }
+              </ul>
+            }
+            @if (d.outcome.sent.length) {
+              <p class="field-label">Sent</p>
+              <ul class="changes">
+                @for (line of d.outcome.sent; track $index) {
+                  <li>{{ line }}</li>
+                }
+              </ul>
+            }
+          } @else {
+            <p class="sam-error" role="alert">{{ d.error }}</p>
+            @for (failure of d.failures ?? []; track failure.url) {
+              <p class="relay-failure"><span class="url">{{ failure.url }}</span> {{ failure.reason }}</p>
+            }
+          }
+          @if (!d.running) {
+            <ng-container buttons>
+              <button type="button" class="action primary" (click)="closeDialog()">Close</button>
+            </ng-container>
+          }
+        </app-dialog>
+      }
+    }
+  }
+}

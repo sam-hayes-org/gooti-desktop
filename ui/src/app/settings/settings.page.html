@@ -1,0 +1,231 @@
+<div class="page-inner">
+  <h1 class="page-title">Settings</h1>
+
+  @if (error()) {
+    <p class="sam-error" role="alert">{{ error() }}</p>
+  }
+
+  @if (settings(); as settings) {
+    <section class="group">
+      <p class="kicker">Unlock</p>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="unlockAtLogin"
+          [checked]="settings.unlockAtLogin"
+          (change)="setUnlockAtLogin($any($event.target))"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Unlock when Gooti starts</span>
+          <span class="copy">
+            The system keychain keeps the key to Gooti's data. Anyone who can use your login can then
+            unlock Gooti without the password.
+          </span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group">
+      <p class="kicker">Lock automatically</p>
+      <div class="lock-after">
+        <label class="choice-label" for="autoLock">Lock after</label>
+        <app-select
+          inputId="autoLock"
+          [options]="lockOptions"
+          [ngModel]="settings.autoLockMinutes"
+          (ngModelChange)="changeLock({ autoLockMinutes: $event })"
+        />
+      </div>
+      <p class="copy">
+        Without use in this window. While Gooti is locked, it cannot sign for apps.
+      </p>
+      <label class="choice-row sam-mt-h">
+        <input
+          type="checkbox"
+          name="lockOnScreenLock"
+          [checked]="settings.lockOnScreenLock"
+          (change)="changeLock({ lockOnScreenLock: $any($event.target).checked })"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Lock when the screen locks</span>
+        </span>
+      </label>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="lockOnSleep"
+          [checked]="settings.lockOnSleep"
+          (change)="changeLock({ lockOnSleep: $any($event.target).checked })"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Lock when the computer sleeps</span>
+        </span>
+      </label>
+    </section>
+  }
+
+  @if (settings(); as settings) {
+    <section class="group">
+      <p class="kicker">App</p>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="keepRunning"
+          [checked]="settings.keepRunning && hasTray()"
+          [disabled]="!hasTray()"
+          (change)="changeApp({ keepRunning: $any($event.target).checked })"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Keep running when the window is closed</span>
+          <span class="copy">
+            @if (hasTray()) {
+              Gooti stays in the tray and keeps signing for your apps. Quit it from the tray.
+            } @else {
+              This desktop shows no tray icon, so closing the window quits Gooti.
+            }
+          </span>
+        </span>
+      </label>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="autostart"
+          [checked]="autostart()"
+          (change)="setAutostart($any($event.target))"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Start Gooti when you log in</span>
+          @if (hasTray()) {
+            <span class="copy">It starts in the tray, without opening the window.</span>
+          }
+        </span>
+      </label>
+      <label class="choice-row">
+        <input
+          type="checkbox"
+          name="checkUpdates"
+          [checked]="settings.checkUpdates"
+          (change)="changeApp({ checkUpdates: $any($event.target).checked })"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Check for updates</span>
+          <span class="copy">When Gooti starts. It asks GitHub for the newest release.</span>
+        </span>
+      </label>
+      <div class="update-row">
+        <button type="button" class="action quiet" [disabled]="checking()" (click)="checkNow()">
+          {{ checking() ? 'Checking…' : 'Check now' }}
+        </button>
+        @if (updateNote()) {
+          <span class="copy" role="status">{{ updateNote() }}</span>
+        }
+      </div>
+    </section>
+  }
+
+  <app-default-relays />
+
+  <section class="group">
+    <p class="kicker">Password</p>
+    <form class="sam-flex-column gap-h" (submit)="$event.preventDefault(); changePassword()">
+      <div class="sam-field">
+        <input
+          type="password"
+          name="currentPassword"
+          placeholder="Current password"
+          aria-label="Current password"
+          autocomplete="current-password"
+          [(ngModel)]="currentPassword"
+        />
+      </div>
+      <div class="sam-field">
+        <input
+          type="password"
+          name="newPassword"
+          placeholder="New password"
+          aria-label="New password"
+          autocomplete="new-password"
+          [(ngModel)]="newPassword"
+        />
+      </div>
+      @if (passwordError()) {
+        <p class="sam-error" role="alert">{{ passwordError() }}</p>
+      }
+      @if (passwordDone()) {
+        <p class="copy" role="status">Your password is changed.</p>
+      }
+      <button
+        type="submit"
+        class="action quiet change"
+        [disabled]="!canChangePassword() || passwordBusy()"
+      >
+        Change password
+      </button>
+    </form>
+  </section>
+
+  <section class="group">
+    <p class="kicker danger">Danger zone</p>
+    <button type="button" class="action danger reset" (click)="reset()">Reset Gooti</button>
+  </section>
+
+  @if (resetAsk(); as ask) {
+    <app-dialog title="Reset Gooti?" [dismissable]="!resetBusy()" (closed)="closeReset()">
+      @if (ask.desktopOnly.length) {
+        @if (ask.backupOn) {
+          <p class="copy">
+            Your backup does not have everything for these identities yet. A reset now could lose their
+            private keys: browsers never hold them.
+          </p>
+        } @else {
+          <p class="copy">
+            These identities keep their private key only on this desktop, and backup is off. A reset deletes
+            those keys for good.
+          </p>
+        }
+        <ul class="reset-list">
+          @for (identity of ask.desktopOnly; track identity.id) {
+            <li>
+              <span class="nick">{{ identity.nick }}</span>
+              @if (resetKeys()[identity.id]; as nsec) {
+                <div class="sam-field">
+                  <input type="text" class="mono" [attr.aria-label]="identity.nick + ' private key (nsec)'" readonly [value]="nsec" />
+                  <app-copy-button [text]="nsec" />
+                </div>
+              }
+            </li>
+          }
+        </ul>
+        @if (ask.backupOn) {
+          <p class="copy">Back up now sends them, so a restore brings them back.</p>
+        } @else {
+          <p class="copy">Backup is off, so only saving each nsec keeps these keys.</p>
+        }
+        <div class="reset-steps">
+          @if (ask.backupOn) {
+            <button type="button" class="action quiet" [disabled]="resetBusy()" (click)="backUpFirst()">
+              Back up now
+            </button>
+          }
+          <button type="button" class="action quiet" [disabled]="resetBusy()" (click)="showResetKeys()">
+            Show private keys
+          </button>
+        </div>
+      } @else if (resetBackedUp()) {
+        <p class="copy" role="status">
+          Their keys are in your backup now. Restoring from your backup brings them back.
+        </p>
+      }
+      <p class="copy">All data on this desktop will be deleted.</p>
+      @if (resetError()) {
+        <p class="sam-error" role="alert">{{ resetError() }}</p>
+      }
+      <ng-container buttons>
+        <button type="button" class="action quiet" [disabled]="resetBusy()" (click)="closeReset()">Cancel</button>
+        <button type="button" class="action danger" [disabled]="resetBusy()" (click)="resetNow()">
+          {{ ask.desktopOnly.length ? 'Reset anyway' : 'Reset' }}
+        </button>
+      </ng-container>
+    </app-dialog>
+  }
+</div>

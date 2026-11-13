@@ -1,0 +1,117 @@
+// Page layout for the wide desktop window. Cards, fields and buttons come from the extension's styles.
+
+// Page components put this class on their host element, which is inline by default.
+.page {
+  display: block;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 28px 40px 40px;
+}
+
+.page-inner {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  row-gap: 14px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  // One button high, with or without a button, so the page below does not move.
+  min-height: 36px;
+  margin-bottom: 10px;
+
+  .page-title {
+    margin: 0;
+  }
+}
+
+.page-title {
+  margin: 0 0 10px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+// Section label, same as the extension's Settings screen.
+.kicker {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.empty-card {
+  align-items: flex-start;
+  gap: 6px;
+
+  .title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+.field-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+// A row of buttons at the end of a form.
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+// Radio and checkbox rows, like the extension's "Sites and the bunker" choice.
+.choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+
+  input {
+    margin-top: 3px;
+  }
+
+  .choice-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .choice-label {
+    font-size: 15px;
+  }
+}

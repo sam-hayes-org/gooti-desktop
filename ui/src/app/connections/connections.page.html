@@ -1,0 +1,122 @@
+<div class="page-inner">
+  <div class="page-head">
+    <h1 class="page-title">Connections</h1>
+    <button type="button" class="action primary" routerLink="/connections/new" data-action="new-connection">
+      <i class="bi bi-plus-lg"></i> Connect new app
+    </button>
+  </div>
+  <p class="copy">
+    Nostr apps on your phone or computer can sign through this desktop. Your private keys stay here. Gooti
+    asks you before it signs, encrypts, or decrypts anything.
+  </p>
+
+  @if (notice()) {
+    <p class="notice" role="status">{{ notice() }}</p>
+  }
+  @if (error()) {
+    <p class="sam-error" role="alert">{{ error() }}</p>
+  }
+
+  @if (info(); as info) {
+    @if (info.paused) {
+      <p class="paused" role="status"><i class="bi bi-pause-circle"></i> All apps are paused.</p>
+    }
+
+    @if (core.pendingAsks().length) {
+      <section class="group">
+        <p class="kicker">Waiting</p>
+        <p class="copy">These requests also show in their own small window.</p>
+        @for (ask of core.pendingAsks(); track ask.key) {
+          <div class="sam-card app-row">
+            <div class="app-text">
+              <span class="app-name">{{ askLabel(ask) }}</span>
+              @if (ask.details.content) {
+                <span class="copy preview">{{ ask.details.content }}</span>
+              }
+            </div>
+            <div class="row-buttons">
+              <button type="button" class="action quiet" (click)="decide(ask.key, false)">Reject</button>
+              <button type="button" class="action primary" (click)="decide(ask.key, true)">Approve</button>
+            </div>
+          </div>
+        }
+      </section>
+    }
+
+    <section class="group">
+      <p class="kicker">Apps</p>
+      @for (connection of info.connections; track connection.id) {
+        <div class="sam-card app-row">
+          <a class="app-text app-link" [routerLink]="['/connections', connection.id]">
+            <span class="app-name">{{ appName(connection) }} <i class="bi bi-chevron-right"></i></span>
+            <span class="copy">
+              Signs as {{ connection.identityNick }}
+              @if (connection.url) {
+                · {{ connection.url }}
+              }
+            </span>
+            <span class="copy">{{ trustLabel[connection.trust] }} · Last used: {{ when(connection.lastUsedAt) }}</span>
+            @if (connection.servedElsewhere) {
+              <span class="copy elsewhere"><i class="bi bi-pc-display"></i> Answered by another Gooti Desktop</span>
+            }
+          </a>
+          @if (!connection.browsers) {
+            <button type="button" class="action quiet" [disabled]="busy()" (click)="remove(connection.id)">
+              Remove
+            </button>
+          }
+        </div>
+      } @empty {
+        <div class="sam-card empty-card">
+          <p class="title">No app yet</p>
+          <p class="copy">Connect new app adds one.</p>
+        </div>
+      }
+      <label class="choice-row sam-mt-h">
+        <input
+          type="checkbox"
+          name="paused"
+          [checked]="info.paused"
+          [disabled]="busy()"
+          (change)="setPaused($any($event.target))"
+        />
+        <span class="choice-text">
+          <span class="choice-label">Pause all apps</span>
+          <span class="copy">Apps get an error until you turn this off. Nothing is signed meanwhile.</span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group">
+      <p class="kicker">Listening on</p>
+      <p class="copy">The relays your apps use.</p>
+      @for (relay of info.relayStatus; track relay.url) {
+        <div class="relay-status" [attr.data-state]="relay.state">
+          <span class="dot"></span>
+          <span class="relay-text">
+            <span class="mono">{{ relay.url }}</span>
+            <span class="copy">
+              @switch (relay.state) {
+                @case ('connected') { Connected }
+                @case ('connecting') { Connecting… }
+                @case ('failed') { {{ relay.reason }} }
+              }
+              @if (usedBy(relay.url); as used) {
+                · {{ used }}
+              }
+            </span>
+          </span>
+        </div>
+      } @empty {
+        @if (allElsewhere()) {
+          <p class="copy">
+            Another Gooti Desktop answers these apps. To answer them here, open an app and choose Sign here
+            instead.
+          </p>
+        } @else {
+          <p class="copy">Gooti connects to relays once an app or a link needs them.</p>
+        }
+      }
+    </section>
+  }
+</div>

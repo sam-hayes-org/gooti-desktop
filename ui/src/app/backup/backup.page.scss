@@ -1,0 +1,125 @@
+.group {
+  margin-top: 10px;
+}
+
+.notice {
+  margin: 0;
+  color: #b6e3c4;
+  font-size: 14px;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.used {
+  color: #e8edf5;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.used.over,
+.copy.over {
+  color: #f0a8a8;
+}
+
+.room {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.track {
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--background-light);
+}
+
+.fill {
+  height: 100%;
+  min-width: 4px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.fill.over {
+  min-width: 0;
+  background: #f0a8a8;
+}
+
+.backup-now,
+.action.quiet,
+.action.danger {
+  align-self: flex-start;
+}
+
+.backup-now {
+  margin-top: 8px;
+}
+
+.relays {
+  user-select: text;
+}
+
+.kicker.danger {
+  margin-top: 30px;
+  color: #dc3545;
+}
+
+.phrase-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phrase {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--background);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  user-select: text;
+}
+
+.copy-field {
+  padding: 0;
+}
+
+.backup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.changes {
+  margin: 0;
+  padding-left: 18px;
+  color: #e8edf5;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.relay-failure {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+
+  .url {
+    color: #e8edf5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+}

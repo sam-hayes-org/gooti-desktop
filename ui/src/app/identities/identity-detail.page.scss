@@ -1,0 +1,111 @@
+.back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+
+  &:hover {
+    color: #ffffff;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border-left: 4px solid var(--primary);
+  background: var(--background-light);
+
+  .page-title {
+    margin: 0;
+  }
+}
+
+.head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+  }
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.group {
+  margin-top: 10px;
+}
+
+// Not `.row`: Bootstrap's grid class of that name adds negative margins and full-width children.
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.sam-field input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.swatch {
+  width: 44px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: var(--background-light);
+  cursor: pointer;
+}
+
+.kicker.danger {
+  margin-top: 30px;
+  color: #dc3545;
+}
+
+.action.danger {
+  align-self: flex-start;
+}
+
+.custody {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.align-start {
+  align-self: flex-start;
+}
+
+.key-missing {
+  color: #f0c36d;
+}
+
+.move-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .sam-box {
+    background: var(--background);
+  }
+}

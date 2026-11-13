@@ -1,0 +1,49 @@
+.group {
+  margin-top: 10px;
+}
+
+.change,
+.reset {
+  align-self: flex-start;
+}
+
+.lock-after {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kicker.danger {
+  margin-top: 30px;
+  color: #dc3545;
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.reset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  .nick {
+    font-weight: 600;
+  }
+
+  .sam-field {
+    margin-top: 4px;
+  }
+}
+
+.reset-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

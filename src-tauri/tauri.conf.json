@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gooti",
+  "mainBinaryName": "gooti-desktop",
+  "identifier": "com.getgooti.desktop",
+  "build": {
+    "beforeDevCommand": "npm --prefix ui start -- --port 1420",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm --prefix ui run build",
+    "frontendDist": "../ui/dist/gooti-ui/browser"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Gooti",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 560,
+        "center": true,
+        "backgroundColor": "#161c26",
+        "theme": "Dark",
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Utility",
+    "shortDescription": "Nostr identity vault and bunker",
+    "longDescription": "Gooti keeps your Nostr identities in an encrypted vault and signs for Nostr apps as a NIP-46 bunker. It syncs with the Gooti browser extension.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Gooti",
+    "homepage": "https://getgooti.com",
+    "copyright": "Public domain (Unlicense)",
+    "license": "Unlicense",
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "desktopTemplate": "linux/gooti.desktop"
+      },
+      "rpm": {
+        "release": "1",
+        "desktopTemplate": "linux/gooti.desktop"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2MUQwOUU3ODJGOEQ1REMKUldUYzFmaUM1d2tkUmhHOHpETHMwMVFvWk9wVWp0S3M4L2ZRMkxESEZjeTJDZjFTaDZOam5wZnQK",
+      "endpoints": [
+        "https://github.com/sam-hayes-org/gooti-desktop/releases/latest/download/latest.json"
+      ]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "nostrconnect"
+        ]
+      }
+    }
+  }
+}
