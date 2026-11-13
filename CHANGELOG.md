@@ -5,6 +5,8 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.1.2 (2026-11-13)
+
 - License: Gooti Desktop is now under the MIT License (0.1.0 and 0.1.1 were released under the
   Unlicense).
 - Info → **Open-source licenses** shows the licenses of everything Gooti ships with. Every bundle
