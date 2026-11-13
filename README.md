@@ -108,6 +108,8 @@ never reach the UI, except when you ask to show an nsec.
   - Ctrl+1 … Ctrl+6: Identities, Connections, Activities, Backup, Settings, Info.
   - Ctrl+L: lock Gooti.
   - In the request window: Ctrl+Enter approves, Ctrl+Shift+Enter rejects.
+- **Info:** version, website, source code, shortcuts, and **Open-source licenses**: Gooti's MIT
+  License and the licenses of everything it ships with (also in every bundle, in `licenses/`).
 
 ## Build and test
 
@@ -145,4 +147,4 @@ for testing by hand in `docs/TESTING.md`.
 
 ---
 
-LICENSE: Public Domain
+License: MIT (see `LICENSE`). Versions 0.1.0 and 0.1.1 were released under the Unlicense.

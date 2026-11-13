@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Nostr identity vault and bunker"
 arch=('x86_64')
 url="https://github.com/sam-hayes-org/gooti-desktop"
-license=('Unlicense')
+license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3' 'libsecret')
 optdepends=('libayatana-appindicator: tray icon')
 provides=('gooti-desktop')
@@ -16,4 +16,6 @@ sha256sums=('SKIP')
 
 package() {
   bsdtar -xf data.tar.gz -C "$pkgdir"
+  # The MIT license where Arch expects it (in the .deb since 0.1.2).
+  install -Dm644 "$pkgdir/usr/lib/Gooti/licenses/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

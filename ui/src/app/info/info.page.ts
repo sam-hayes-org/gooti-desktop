@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { CoreService, InfoLink, errorMessage } from '../core/core.service';
 import { CopyButton } from '../shared/copy-button';
 import { SHORTCUTS } from '../shared/shortcuts';
@@ -9,7 +10,7 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
 /** Version and links, like the extension's Info tab. */
 @Component({
   selector: 'app-info-page',
-  imports: [CopyButton],
+  imports: [CopyButton, RouterLink],
   host: { class: 'page' },
   template: `
     <div class="page-inner">
@@ -43,6 +44,12 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
       </section>
 
       <section class="group">
+        <p class="kicker">License</p>
+        <p class="copy">Gooti Desktop is under the MIT License. It ships with open-source software by others.</p>
+        <a class="link" routerLink="/info/licenses" data-link="licenses">Open-source licenses</a>
+      </section>
+
+      <section class="group">
         <p class="kicker">Keyboard shortcuts</p>
         <dl class="shortcuts">
           @for (shortcut of shortcuts; track shortcut.keys) {
@@ -73,6 +80,7 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
       color: #c5dbff;
       font: inherit;
       font-size: 14px;
+      text-decoration: none;
       cursor: pointer;
 
       &:hover {

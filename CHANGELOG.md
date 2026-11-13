@@ -5,6 +5,15 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.1.2 (2026-11-13)
+
+- License: Gooti Desktop is now under the MIT License (0.1.0 and 0.1.1 were released under the
+  Unlicense).
+- Info → **Open-source licenses** shows the licenses of everything Gooti ships with. Every bundle
+  carries them in `licenses/`, and the AUR package installs the MIT license where Arch expects it.
+- The side panel no longer shows the channel and version under Lock Gooti; Info shows them. When an
+  update is out, the side panel names both versions ("Gooti 0.1.2 is available. You have 0.1.1.").
+
 ## 0.1.1 (2026-11-13)
 
 - Building: npm no longer warns about the install scripts of four UI build tools; they are

@@ -155,6 +155,7 @@ export class FakeCore {
   bunkerSetAppRelays = vi.fn(async (_connectionId: string, relays: string[]) => relays);
   connectionDetail: ConnectionDetail = { ...CONNECTION, rules: [] };
   bunkerConnection = vi.fn(async () => this.connectionDetail);
+  licensesText = vi.fn(async () => 'Gooti Desktop: licenses\n\nMIT License\n\nCopyright (c) 2026 Sam Hayes');
   bunkerSetTrust = vi.fn(async (_id: string, trust: ConnectionDetail['trust']) => {
     this.connectionDetail = { ...this.connectionDetail, trust };
     return this.connectionDetail;

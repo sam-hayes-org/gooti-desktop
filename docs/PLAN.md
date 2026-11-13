@@ -26,7 +26,7 @@ None right now.
 | Platforms | Linux first: AppImage, deb, rpm, AUR. Windows second: an NSIS installer per user, built, tested and released by CI (no Windows machine here; tests also run as Windows binaries under Wine). CI compiles Mac only to catch errors. |
 | Signing | Unsigned alpha. |
 | Relays | Bunker default `wss://relay.getgooti.com` only (relay.nsec.app was dropped: it often timed out). Users can add more. relay.getgooti.com must accept kind 24133 (ephemeral, filtered by `#p`), and optionally NIP-42 AUTH. |
-| License | Public domain (Unlicense), like the extension. |
+| License | MIT (since 0.1.2; 0.1.0 and 0.1.1 were released under the Unlicense, as the extension still is). |
 | Branches | Work happens on `alpha`. `main` holds releases. |
 | Naming (2026-11-12) | In both apps, what the passphrase opens on the relays is the **backup** ("Back up now", "Restore from backup"), never "sync". The local store has no name: "Unlock Gooti", "Gooti password". Custody is "Where the key is used": Browsers and desktops, or Desktop only. Users see one backup; "shared record" and "desktop record" below are names for the docs only. Rules in `CLAUDE.md`. |
 
