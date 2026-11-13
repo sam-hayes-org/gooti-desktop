@@ -5,6 +5,9 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- Building: `npm run build:local:appimage` (also `:deb`, `:rpm`) builds one format with a faster
+  Cargo profile (`local`): about a minute after a small change instead of about eight.
+
 ## 0.1.2 (2026-11-13)
 
 - License: Gooti Desktop is now under the MIT License (0.1.0 and 0.1.1 were released under the

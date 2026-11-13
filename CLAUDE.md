@@ -35,6 +35,8 @@ A generated key is made in the core; the UI only sends a key the user pasted to 
 npm install            # root: Tauri CLI. Also runs `npm ci` in ui/
 npm run dev            # starts ng serve on port 1420 and the app
 npm run build:local    # Linux bundles in target/release/bundle, without update files (no key needed)
+npm run build:local:appimage  # only the AppImage (also :deb, :rpm), profile "local" in target/local:
+                              # about 1 minute after a small change instead of about 8
 npm run build          # the same plus signed update files; needs the update key (docs/RELEASING.md)
 npm run build:windows  # the Windows installer, cross-built on Linux (see Windows below)
 npm run start:local:latest  # starts the newest AppImage from that folder (-- --which: only print it)

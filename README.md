@@ -126,6 +126,7 @@ Then:
 npm install
 npm run dev                  # run from source (uses the real data folder)
 npm run build:local          # AppImage, deb and rpm in target/release/bundle, without update files
+npm run build:local:appimage # only the AppImage (also :deb, :rpm), faster to rebuild, in target/local
 npm run start:local:latest   # start the newest local AppImage
 npm run build:windows        # the Windows installer, cross-built (tools: CLAUDE.md, Windows)
 npm test                     # Rust and UI tests

@@ -17,3 +17,12 @@ serde_json = "1"
 codegen-units = 1
 lto = true
 strip = true
+
+# Local test builds (npm run build:local:appimage and the like): optimized like a release, but
+# without whole-program LTO and with incremental builds, so a rebuild after a small change takes
+# a minute or two instead of seven. Releases (GitHub, npm run build:local) keep the release profile.
+[profile.local]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
