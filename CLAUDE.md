@@ -151,5 +151,6 @@ Only the tray menu, notifications and the window frame stay system.
 ## Git
 
 Work on the `beta` branch, and commit there after a verified step. Leave `main` and `develop` alone unless
-asked. GitHub runs nothing for `beta`: a push to `develop` builds test bundles, a `v*` tag on `main` builds
-a release (`docs/RELEASING.md`).
+asked. GitHub runs nothing for `beta`: a push to `develop` builds test bundles, a `v*` tag builds a
+release (`docs/RELEASING.md`). The user tags releases themselves: on `develop` before 1.0.0, on `main`
+from 1.0.0 on.
