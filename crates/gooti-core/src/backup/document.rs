@@ -251,7 +251,10 @@ fn valid_identity(value: &Value) -> bool {
     }
     let privkey = row.get("privkey");
     let bunker = row.get("bunker");
-    if privkey.is_some() == bunker.is_some() {
+    // A live row has a key or a bunker pointer, not both. A tombstone (`deletedAt`) may have neither:
+    // a newer Gooti keeps no secrets in it. What it does carry is checked like any other row.
+    let deleted = row.get("deletedAt").is_some();
+    if privkey.is_some() == bunker.is_some() && !(deleted && privkey.is_none()) {
         return false;
     }
     if let Some(privkey) = privkey {

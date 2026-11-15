@@ -5,6 +5,9 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- Backup: Gooti reads a deleted identity that has no key or bunker pointer in its row. A later
+  Gooti keeps no secrets in such a row. This version still writes the key, so older versions can
+  read what it sends.
 - Backup: a backup made by a newer Gooti is no longer replaced by this version's older document.
   Gooti says "This backup was made by a newer Gooti. Update Gooti first." and leaves it alone.
 - Backup: when a relay does not answer and the others have no backup, Gooti no longer takes that
