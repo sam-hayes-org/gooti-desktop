@@ -77,7 +77,10 @@ async fn fetch_remote(keys: &BackupKeys, relays: &[String], io: &impl RelayIo) -
     };
     let document = read_backup_payload(&event, SHARED_D_TAG)
         .and_then(|payload| open_shared_document(payload, &keys.encryption_key))
-        .map_err(|_| Error::WrongPassphrase)?;
+        .map_err(|error| match error {
+            Error::NewerBackup => error,
+            _ => Error::WrongPassphrase,
+        })?;
     Ok(Remote {
         document,
         created_at: Some(event.created_at.as_secs()),

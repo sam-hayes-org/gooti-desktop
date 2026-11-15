@@ -42,6 +42,8 @@ pub enum Error {
     WrongPassphrase,
     #[error("The backup on the relay is damaged.")]
     InvalidBackup,
+    #[error("This backup was made by a newer Gooti. Update Gooti first.")]
+    NewerBackup,
     #[error("A backup cannot be larger than 1 MB.")]
     VaultTooLarge,
     #[error("Add a relay first.")]
@@ -100,6 +102,7 @@ impl Error {
             Error::InvalidPassphrase => "invalid_passphrase",
             Error::WrongPassphrase => "wrong_passphrase",
             Error::InvalidBackup => "invalid_backup",
+            Error::NewerBackup => "newer_backup",
             Error::VaultTooLarge => "vault_too_large",
             Error::NoRelays => "no_relays",
             Error::InvalidRelay => "invalid_relay",

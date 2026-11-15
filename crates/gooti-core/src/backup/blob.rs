@@ -43,14 +43,22 @@ pub(crate) fn seal_plaintext(plaintext: &[u8], encryption_key: &[u8; 32]) -> Res
     Ok(STANDARD.encode(packed))
 }
 
-/// `Ok(None)` for an older document (not v2): the caller publishes the current one over it.
-/// `Err` when the key is wrong or the blob was changed.
+/// `Ok(None)` for an older document (before v2): the caller publishes the current one over it.
+/// `Err` when the key is wrong or the blob was changed, and `NewerBackup` for a newer document.
 pub fn open_shared_document(
     payload: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<SharedDocument>> {
     let plaintext = open_plaintext(payload, encryption_key)?;
     let parsed: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::InvalidBackup)?;
+    // A newer Gooti made it: publishing over it would destroy what this version cannot read.
+    if parsed
+        .get("v")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v > 2)
+    {
+        return Err(Error::NewerBackup);
+    }
     if parsed.get("v") != Some(&Value::from(2)) {
         return Ok(None);
     }
@@ -95,4 +103,31 @@ fn shared_plaintext(document: &SharedDocument) -> Zeroizing<Vec<u8>> {
         "sites": document.sites,
     });
     Zeroizing::new(serde_json::to_vec(&value).expect("a shared document serializes"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sealed(document: &Value) -> String {
+        seal_plaintext(&serde_json::to_vec(document).unwrap(), &[7u8; 32]).unwrap()
+    }
+
+    #[test]
+    fn a_newer_document_is_refused_and_an_older_one_is_replaced() {
+        let empty = |v: u64| json!({ "v": v, "identities": [], "permissions": [], "relays": [], "sites": [] });
+
+        let newer = open_shared_document(&sealed(&empty(3)), &[7u8; 32]);
+        assert!(matches!(newer, Err(Error::NewerBackup)));
+        assert!(
+            open_shared_document(&sealed(&empty(1)), &[7u8; 32])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            open_shared_document(&sealed(&empty(2)), &[7u8; 32])
+                .unwrap()
+                .is_some()
+        );
+    }
 }

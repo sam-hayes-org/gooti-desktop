@@ -5,6 +5,11 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- Backup: a backup made by a newer Gooti is no longer replaced by this version's older document.
+  Gooti says "This backup was made by a newer Gooti. Update Gooti first." and leaves it alone.
+- Backup: when a relay does not answer and the others have no backup, Gooti no longer takes that
+  for "no backup" and sends its own vault over a backup the silent relay may hold. It reports the
+  relay instead.
 - Building: `npm run build:local:appimage` (also `:deb`, `:rpm`) builds one format with a faster
   Cargo profile (`local`): about a minute after a small change instead of about eight.
 
