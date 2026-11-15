@@ -5,6 +5,8 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.1.3 (2026-11-15)
+
 - Backup: Gooti reads a deleted identity that has no key or bunker pointer in its row. A later
   Gooti keeps no secrets in such a row. This version still writes the key, so older versions can
   read what it sends.
