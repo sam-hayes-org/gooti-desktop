@@ -98,13 +98,22 @@ impl RelayIo for WebSocketRelays {
                 failures,
             });
         }
-        Ok(reached.into_iter().flatten().reduce(|newest, event| {
+        let newest = reached.into_iter().flatten().reduce(|newest, event| {
             if event.created_at > newest.created_at {
                 event
             } else {
                 newest
             }
-        }))
+        });
+        // A relay that did not answer may hold the backup. Only when every relay answered is there
+        // none, and only then may the caller publish this desktop's vault as the first.
+        if newest.is_none() && !failures.is_empty() {
+            return Err(Error::Relays {
+                message: "A relay could not be reached, and the others have no backup.".into(),
+                failures,
+            });
+        }
+        Ok(newest)
     }
 }
 

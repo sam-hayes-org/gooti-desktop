@@ -5,6 +5,19 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.1.3 (2026-11-15)
+
+- Backup: Gooti reads a deleted identity that has no key or bunker pointer in its row. A later
+  Gooti keeps no secrets in such a row. This version still writes the key, so older versions can
+  read what it sends.
+- Backup: a backup made by a newer Gooti is no longer replaced by this version's older document.
+  Gooti says "This backup was made by a newer Gooti. Update Gooti first." and leaves it alone.
+- Backup: when a relay does not answer and the others have no backup, Gooti no longer takes that
+  for "no backup" and sends its own vault over a backup the silent relay may hold. It reports the
+  relay instead.
+- Building: `npm run build:local:appimage` (also `:deb`, `:rpm`) builds one format with a faster
+  Cargo profile (`local`): about a minute after a small change instead of about eight.
+
 ## 0.1.2 (2026-11-13)
 
 - License: Gooti Desktop is now under the MIT License (0.1.0 and 0.1.1 were released under the

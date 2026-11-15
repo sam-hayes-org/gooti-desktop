@@ -82,6 +82,27 @@ async fn one_working_relay_is_enough_and_all_failing_lists_each_reason() {
 }
 
 #[tokio::test]
+async fn a_down_relay_and_an_empty_one_is_not_an_empty_backup() {
+    let (empty, _) = start_relay(Mode::Normal).await;
+    let keys = derive_shared_keys(&generate_passphrase()).unwrap();
+
+    let error = relays(2000)
+        .fetch_newest(
+            &["ws://127.0.0.1:9".to_string(), empty],
+            &keys.pubkey_hex(),
+            SHARED_D_TAG,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::Relays { .. }));
+    assert_eq!(
+        error.to_string(),
+        "A relay could not be reached, and the others have no backup."
+    );
+}
+
+#[tokio::test]
 async fn a_relay_without_eose_ends_the_wait_with_what_it_sent() {
     let (url, stored) = start_relay(Mode::Silent).await;
     let keys = derive_shared_keys(&generate_passphrase()).unwrap();

@@ -1,6 +1,6 @@
 {
   "name": "gooti-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "scripts": {
     "tauri": "tauri",
@@ -8,6 +8,9 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "build:local": "tauri build --config src-tauri/tauri.local.conf.json",
+    "build:local:appimage": "tauri build --bundles appimage --config src-tauri/tauri.local.conf.json -- --profile local",
+    "build:local:deb": "tauri build --bundles deb --config src-tauri/tauri.local.conf.json -- --profile local",
+    "build:local:rpm": "tauri build --bundles rpm --config src-tauri/tauri.local.conf.json -- --profile local",
     "build:windows": "tools/build-windows.sh",
     "start:local:latest": "tools/start-latest.sh",
     "test": "cargo test --workspace && npm --prefix ui test -- --watch=false",

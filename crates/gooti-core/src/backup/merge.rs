@@ -99,7 +99,10 @@ fn prefer<T: Revisioned + Clone>(local: &T, remote: &T) -> T {
 /// Otherwise a higher revision wins. A tie keeps the local row, and fills a conversation key
 /// the local row does not have.
 fn prefer_identity(local: &SharedIdentity, remote: &SharedIdentity) -> SharedIdentity {
-    if local.privkey.is_some() != remote.privkey.is_some() {
+    // A tombstone without a key or a pointer (a newer Gooti keeps no secrets in it) has no custody:
+    // its revision decides, like any other deletion.
+    let keyless = |row: &SharedIdentity| row.privkey.is_none() && row.bunker.is_none();
+    if local.privkey.is_some() != remote.privkey.is_some() && !keyless(local) && !keyless(remote) {
         let local_custody = local.custody_at.unwrap_or(0.0);
         let remote_custody = remote.custody_at.unwrap_or(0.0);
         if local_custody != remote_custody {
@@ -130,4 +133,63 @@ fn prefer_identity(local: &SharedIdentity, remote: &SharedIdentity) -> SharedIde
         bunker.client_secret_key = Some(spare.clone());
     }
     filled
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::backup::document::parse_shared_document;
+
+    const PRIVKEY: &str = "abababababababababababababababababababababababababababababababab";
+
+    fn pubkey() -> String {
+        crate::identity::pubkey_for_privkey(PRIVKEY).unwrap()
+    }
+
+    fn document(row: serde_json::Value) -> serde_json::Value {
+        json!({ "v": 2, "identities": [row], "permissions": [], "relays": [], "sites": [] })
+    }
+
+    #[test]
+    fn a_tombstone_without_key_or_pointer_is_valid_and_a_live_row_still_needs_one() {
+        let tombstone = json!({
+            "pubkey": pubkey(), "nick": "Ada", "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": 5, "deletedAt": 8
+        });
+        assert!(parse_shared_document(document(tombstone.clone())).is_some());
+
+        let mut live = tombstone.clone();
+        live.as_object_mut().unwrap().remove("deletedAt");
+        assert!(parse_shared_document(document(live)).is_none());
+
+        let mut both = tombstone;
+        both["privkey"] = json!(PRIVKEY);
+        both["bunker"] = json!({ "pubkey": pubkey(), "relays": ["wss://r"], "secret": null });
+        assert!(parse_shared_document(document(both)).is_none());
+    }
+
+    #[test]
+    fn a_keyless_tombstone_beats_an_older_live_row_whatever_its_custody() {
+        let mut live = parse_shared_document(document(json!({
+            "pubkey": pubkey(), "privkey": PRIVKEY, "nick": "Ada",
+            "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": 5, "custodyAt": 100
+        })))
+        .unwrap();
+        let dead = parse_shared_document(document(json!({
+            "pubkey": pubkey(), "nick": "Ada", "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": 5, "deletedAt": 8
+        })))
+        .unwrap();
+
+        let merged = merge_shared_documents(&live, &dead);
+        assert_eq!(merged.identities[0].deleted_at, Some(8.0));
+        let merged = merge_shared_documents(&dead, &live);
+        assert_eq!(merged.identities[0].deleted_at, Some(8.0));
+
+        live.identities[0].updated_at = 20.0;
+        let merged = merge_shared_documents(&dead, &live);
+        assert!(merged.identities[0].deleted_at.is_none());
+    }
 }

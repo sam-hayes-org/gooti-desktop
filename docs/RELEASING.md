@@ -25,6 +25,9 @@ In the GitHub repository (Settings → Secrets and variables → Actions), add:
 
 - `npm run build:local`: AppImage, deb and rpm in `target/release/bundle`, without update files. Needs
   no key. Enough to try a build (`src-tauri/tauri.local.conf.json` turns the update files off).
+- `npm run build:local:appimage` (also `:deb`, `:rpm`): one format, with the Cargo profile `local`
+  (no whole-program LTO, incremental) in `target/local/bundle`. After a small change it takes about a
+  minute instead of about eight; the binary is somewhat larger. For trying changes, not for releases.
 - `npm run build`: the same plus the signed update files, as the release workflow makes them. It needs
   the key in the environment (fish: `env TAURI_SIGNING_PRIVATE_KEY=(cat ~/.tauri/gooti-desktop.key | string collect) ...`):
 
