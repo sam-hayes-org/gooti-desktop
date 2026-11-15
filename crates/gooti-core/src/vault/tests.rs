@@ -389,8 +389,8 @@ fn edits_stamp_the_sync_document_and_deletes_leave_a_tombstone() {
     vault.delete_identity(&alice.id).unwrap();
     let row = shared_document_of(&vault).identities[0].clone();
     assert!(row.deleted_at.is_some());
-    // Like the extension, the tombstone keeps the key, so the document stays valid there.
-    assert_eq!(row.privkey.as_deref(), Some(HEX));
+    // A tombstone keeps no secret.
+    assert!(row.privkey.is_none() && row.bunker.is_none());
 }
 
 #[test]

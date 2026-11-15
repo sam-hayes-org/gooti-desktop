@@ -5,11 +5,10 @@ does in full is in `README.md`.
 
 ## Unreleased
 
-## 0.1.3 (2026-11-15)
+## 0.1.4 (2026-11-15)
 
-- Backup: Gooti reads a deleted identity that has no key or bunker pointer in its row. A later
-  Gooti keeps no secrets in such a row. This version still writes the key, so older versions can
-  read what it sends.
+- Backup: a deleted identity leaves a row with no private key and no bunker secret in the backup.
+  Gooti reads such a row, and the extension 2.0.0 does too.
 - Backup: a backup made by a newer Gooti is no longer replaced by this version's older document.
   Gooti says "This backup was made by a newer Gooti. Update Gooti first." and leaves it alone.
 - Backup: when a relay does not answer and the others have no backup, Gooti no longer takes that

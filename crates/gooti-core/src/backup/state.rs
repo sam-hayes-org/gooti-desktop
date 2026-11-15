@@ -99,11 +99,17 @@ pub fn stamp_identity(document: &mut SharedDocument, identity: &LiveIdentity, no
 }
 
 /// Marks a deleted identity, its permissions and its site bindings.
-/// The row keeps its key material, like the extension's tombstone.
+/// A tombstone stays in every backup, so it keeps no secret: no private key, no bunker secret and
+/// no conversation key. A bunker identity keeps its pointer.
 pub fn tombstone_identity(document: &mut SharedDocument, identity: &LiveIdentity, now: Millis) {
     let previous = take_identity(document, &identity.pubkey);
     let updated_at = previous.as_ref().map(|p| p.updated_at).unwrap_or(now);
     let mut record = identity_record(identity, updated_at, previous.as_ref());
+    record.privkey = None;
+    if let Some(bunker) = record.bunker.as_mut() {
+        bunker.secret = None;
+        bunker.client_secret_key = None;
+    }
     record.deleted_at = Some(now);
     document.identities.push(record);
     document.relays.clear();
@@ -365,6 +371,9 @@ mod tests {
         tombstone_identity(&mut document, &alice, 200.0);
         let row = &document.identities[0];
         assert_eq!((row.updated_at, row.deleted_at), (100.0, Some(200.0)));
+        assert!(row.privkey.is_none());
+        let bunker = row.bunker.as_ref().unwrap();
+        assert!(bunker.secret.is_none() && bunker.client_secret_key.is_none());
         // A deleted identity that is not live stays as a tombstone in the next projection.
         let (projected, _) = project_shared_document(&document, &[], 300.0);
         assert_eq!(projected.identities.len(), 1);
@@ -372,5 +381,18 @@ mod tests {
         let (projected, _) = project_shared_document(&document, &[alice], 300.0);
         assert_eq!(projected.identities[0].updated_at, 300.0);
         assert_eq!(projected.identities[0].deleted_at, None);
+    }
+
+    #[test]
+    fn tombstone_of_a_key_identity_drops_the_key() {
+        let mut ada = live(&"22".repeat(32), "Ada");
+        ada.privkey = Some("ab".repeat(32));
+        ada.bunker = None;
+        let mut document = SharedDocument::default();
+        stamp_identity(&mut document, &ada, 100.0);
+        tombstone_identity(&mut document, &ada, 200.0);
+        let row = &document.identities[0];
+        assert!(row.privkey.is_none() && row.bunker.is_none());
+        assert_eq!(row.deleted_at, Some(200.0));
     }
 }
