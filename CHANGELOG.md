@@ -5,6 +5,10 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- Backup: a deleted identity leaves a row with no private key and no bunker secret in the backup.
+  Read this only with Gooti Desktop 0.1.3 or later and extension 2.0.0 or later; older versions
+  reject such a row.
+
 ## 0.1.3 (2026-11-15)
 
 - Backup: Gooti reads a deleted identity that has no key or bunker pointer in its row. A later
