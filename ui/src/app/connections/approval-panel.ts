@@ -14,6 +14,7 @@ const TITLES: Record<BunkerAsk['method'], string> = {
   nip44_encrypt: 'Encrypt a message?',
   nip04_decrypt: 'Decrypt a message?',
   nip44_decrypt: 'Decrypt a message?',
+  connect: 'Allow this browser?',
 };
 
 export const REMEMBER_CHOICES: { value: Remember; label: string; longer: boolean }[] = [
@@ -56,6 +57,11 @@ export class ApprovalPanel {
   protected readonly identityNick = computed(() => {
     const ask = this.ask();
     return this.#core.identities().find((i) => i.pubkey === ask?.identityPubkey)?.nick ?? 'an identity';
+  });
+  /** "just now", "2 minutes ago". */
+  protected readonly askedAgo = computed(() => {
+    const minutes = Math.floor((Date.now() - (this.ask()?.receivedAt ?? Date.now())) / 60_000);
+    return minutes < 1 ? 'just now' : minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
   });
   protected readonly kindLabel = computed(() => kindLabel(this.ask()?.details.kind));
   /** Sensitive kinds are remembered for an hour at most. */

@@ -1,6 +1,7 @@
 // A fresh browser takes the desktop's vault and signs through it, with the extension's own
 // code. For crates/gooti-core/tests/e2e_extension.rs.
-//   custody <file.json>  with { payload, encryptionKeyHex, relay, privkey }
+//   custody <file.json>  with { payload, encryptionKeyHex, relay, privkey, browserKey }
+// browserKey is the browser's own key, already allowed on the desktop.
 // Also checks the 2.1 custody rule: a browser's newer copy of the key loses to the move.
 import { readFileSync } from 'node:fs';
 import { verifyEvent } from 'nostr-tools';
@@ -16,6 +17,7 @@ async function main() {
     encryptionKeyHex: string;
     relay: string;
     privkey: string;
+    browserKey: string;
   };
   const document = await openSharedDocument(input.payload, hexToBytes(input.encryptionKeyHex));
   if (!document) {
@@ -29,14 +31,17 @@ async function main() {
   );
   const identity = local.identities[0];
   const bunker = identity.bunker;
-  if (!bunker?.clientSecretKey) {
-    throw new Error('no shared session key');
+  if (!bunker) {
+    throw new Error('no pointer to the desktop');
+  }
+  if (bunker.clientSecretKey) {
+    throw new Error('the pointer still carries a shared session key');
   }
   // The pointer names the desktop's wss:// relays; this test relay runs on localhost.
   // As the background does for a row with custodyAt: ping, then name the site.
   const row = document.identities[0];
   const signed = await bunkerSignEvent(
-    bunker.clientSecretKey,
+    input.browserKey,
     { ...bunker, relays: [input.relay] },
     { kind: 1, content: 'signed through the desktop', tags: [], created_at: 1_700_000_000 },
     {

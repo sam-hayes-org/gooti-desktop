@@ -13,6 +13,12 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The real relay the `--ignored` tests talk to: Gooti's test relay, never relay.getgooti.com, which
+/// holds the backups of real users. `GOOTI_TEST_RELAY` picks another one.
+pub fn test_relay() -> String {
+    std::env::var("GOOTI_TEST_RELAY").unwrap_or_else(|_| "wss://test.getgooti.com".to_string())
+}
+
 /// How the WebSocket test relay behaves.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
@@ -267,5 +273,50 @@ impl RelayIo for MemoryRelays {
             })
             .map(|(_, event)| event.clone())
             .max_by_key(|event| event.created_at))
+    }
+
+    async fn fetch_newest_also(
+        &self,
+        relays: &[String],
+        pubkey: &str,
+        d_tag: &str,
+        also_d: &str,
+    ) -> Result<(Option<Event>, Option<Vec<Event>>)> {
+        let newest = self.fetch_newest(relays, pubkey, d_tag).await?;
+        let down = self.down.lock().unwrap().clone();
+        let also = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(relay, event)| {
+                relays.contains(relay)
+                    && !down.contains(relay)
+                    && event.pubkey.to_hex() == pubkey
+                    && event.tags.identifier().as_deref() == Some(also_d)
+            })
+            .map(|(_, event)| event.clone())
+            .collect();
+        Ok((newest, Some(also)))
+    }
+
+    async fn fetch_all(&self, relays: &[String], pubkey: &str) -> Result<Vec<Event>> {
+        let down = self.down.lock().unwrap().clone();
+        if relays.iter().all(|r| down.contains(r)) {
+            return Err(Error::Relays {
+                message: "No relay could be reached.".into(),
+                failures: vec![],
+            });
+        }
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(relay, event)| {
+                relays.contains(relay) && !down.contains(relay) && event.pubkey.to_hex() == pubkey
+            })
+            .map(|(_, event)| event.clone())
+            .collect())
     }
 }

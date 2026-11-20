@@ -8,6 +8,7 @@ import { openSharedDocument, sealSharedDocument, sharedContentChars } from '@ext
 import { describeChanges } from '@ext/backup/changes';
 import { assertSharedDocument, SharedDocument, SharedIdentity } from '@ext/backup/document';
 import { buildBackupEvent } from '@ext/backup/event';
+import { buildDeviceEvent, readDevice, sealDeviceRecord } from '@ext/backup/device';
 import { activeSharedDocument, mergeSharedDocuments } from '@ext/backup/merge';
 import { deriveSharedKeys, isPassphrase, normalizePassphrase } from '@ext/backup/phrase';
 import { canonicalSharedDocument } from '@ext/backup/state';
@@ -48,7 +49,7 @@ function doc(parts: Partial<SharedDocument>): SharedDocument {
 const full = doc({
   identities: [
     local(ALICE, 'Alice', 1_700_000_000_000, { color: '#a1b2c3' }),
-    local(BOB, 'Bob', 1_700_000_000_500),
+    local(BOB, 'Bob', 1_700_000_000_500, { site: 'localhost:5173' }),
     bunker('Phone', 1_700_000_001_000, { askSite: false, clientSecretKey: key(0x66), secret: 's3cret' }),
     local(CAROL, 'Carol', 1_700_000_000_000, { deletedAt: 1_700_000_002_000 }),
   ],
@@ -121,6 +122,18 @@ async function main() {
     }
   });
 
+  // Device records: one live, one removed, as events; and which plaintexts are valid.
+  const deviceRecords = [
+    { id: '0a'.repeat(16), name: 'Firefox on Linux', app: 'browser', backedUpAt: 1_762_000_000_123 },
+    { id: '0b'.repeat(16), removedAt: 1_762_000_000_456 },
+  ];
+  const deviceEvents = [];
+  for (const record of deviceRecords) {
+    const sealed = await sealDeviceRecord(record as never, main.encryptionKey);
+    deviceEvents.push({ record, event: buildDeviceEvent(main.signingKey, record.id, sealed, 1_762_000_000) });
+  }
+  const deviceValidity = deviceCases().map(({ name, value }) => ({ name, value, read: readDevice(value) }));
+
   const colors = [pub(ALICE), pub(BOB), pub(CAROL), PHONE, '00'.repeat(32), 'ff'.repeat(32)].map((pubkey) => ({
     pubkey,
     color: colorFromPubkey(pubkey),
@@ -144,6 +157,7 @@ async function main() {
         merges,
         documents,
         colors,
+        devices: { events: deviceEvents, validity: deviceValidity },
       },
       null,
       2,
@@ -206,6 +220,16 @@ function mergeCases(): { name: string; local: SharedDocument; remote: SharedDocu
       name: 'tie with a different bunker secret keeps local without a key',
       local: doc({ identities: [bunker('Phone', 500)] }),
       remote: doc({ identities: [bunker('Phone', 500, { secret: 'other', clientSecretKey: key(0x77) })] }),
+    },
+    {
+      name: 'a newer regular row drops the site mark',
+      local: doc({ identities: [{ ...a, site: 'primal.net' }] }),
+      remote: doc({ identities: [{ ...a, updatedAt: a.updatedAt + 1 }] }),
+    },
+    {
+      name: 'an older regular row keeps the site mark',
+      local: doc({ identities: [{ ...a, site: 'primal.net', updatedAt: a.updatedAt + 1 }] }),
+      remote: doc({ identities: [a] }),
     },
     {
       name: 'permissions and sites merge by key and revision',
@@ -300,8 +324,33 @@ function validityCases(): { name: string; value: unknown }[] {
     { name: 'site host with a slash', value: doc({ sites: [{ host: 'x.com/a', identityPubkey: a.pubkey, updatedAt: 1 }] }) },
     { name: 'custody time', value: doc({ identities: [{ ...a, custodyAt: 5 }] }) },
     { name: 'custody time that is not a number', value: doc({ identities: [{ ...a, custodyAt: 'soon' as never }] }) },
+    { name: 'site identity', value: doc({ identities: [{ ...a, site: 'primal.net' }] }) },
+    { name: 'site identity with a host and port', value: doc({ identities: [{ ...a, site: 'localhost:5173' }] }) },
+    { name: 'site that is empty', value: doc({ identities: [{ ...a, site: '' }] }) },
+    { name: 'site with a slash', value: doc({ identities: [{ ...a, site: 'x.com/a' }] }) },
+    { name: 'site that is not a string', value: doc({ identities: [{ ...a, site: 7 as never }] }) },
     { name: 'fractional timestamps', value: doc({ identities: [{ ...a, updatedAt: 1.5 }] }) },
     { name: 'unknown fields are kept', value: { ...doc({ identities: [{ ...a, future: 1 } as never] }), future: true } },
+  ];
+}
+
+
+function deviceCases(): { name: string; value: unknown }[] {
+  const ok = { id: '0c'.repeat(16), name: 'Gooti Desktop on Linux', app: 'desktop', backedUpAt: 5 };
+  return [
+    { name: 'live', value: { v: 1, device: ok } },
+    { name: 'removed', value: { v: 1, device: { id: ok.id, removedAt: 7 } } },
+    { name: 'fractional time', value: { v: 1, device: { ...ok, backedUpAt: 5.5 } } },
+    { name: 'name of 80 characters', value: { v: 1, device: { ...ok, name: 'é'.repeat(80) } } },
+    { name: 'name of 81 characters', value: { v: 1, device: { ...ok, name: 'é'.repeat(81) } } },
+    { name: 'blank name', value: { v: 1, device: { ...ok, name: '  ' } } },
+    { name: 'upper case id', value: { v: 1, device: { ...ok, id: 'AB'.repeat(16) } } },
+    { name: 'short id', value: { v: 1, device: { ...ok, id: 'ab'.repeat(15) } } },
+    { name: 'unknown app', value: { v: 1, device: { ...ok, app: 'phone' } } },
+    { name: 'time not a number', value: { v: 1, device: { ...ok, backedUpAt: '5' } } },
+    { name: 'removed time not a number', value: { v: 1, device: { id: ok.id, removedAt: null } } },
+    { name: 'version 2', value: { v: 2, device: ok } },
+    { name: 'no device', value: { v: 1 } },
   ];
 }
 

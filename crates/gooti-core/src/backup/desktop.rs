@@ -16,7 +16,8 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::blob::{open_plaintext, seal_plaintext};
-use crate::bunker::state::Connection;
+use crate::bunker::policy::Trust;
+use crate::bunker::state::{BrowserDevice, Connection};
 use crate::error::{Error, Result};
 
 /// Milliseconds since 1970, like the shared record's stamps.
@@ -65,6 +66,15 @@ pub struct DesktopDocument {
     pub connections: BTreeMap<String, Row<Connection>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bunker_relays: Option<Row<Vec<String>>>,
+    /// Browser key → browser with its own key: approved or blocked (`bunker::state::BrowserDevice`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub browsers: BTreeMap<String, Row<BrowserDevice>>,
+    /// Identity → the relays browsers reach that Desktop only identity on.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub browser_relays: BTreeMap<String, Row<Vec<String>>>,
+    /// Identity → how far browsers may go for that Desktop only identity without asking.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub browser_trust: BTreeMap<String, Row<Trust>>,
 }
 
 impl DesktopDocument {
@@ -118,6 +128,9 @@ pub fn merge_desktop_documents(
             (Some(l), Some(r)) => Some(if r.at > l.at { r.clone() } else { l.clone() }),
             (l, r) => l.clone().or_else(|| r.clone()),
         },
+        browsers: merge_rows(&local.browsers, &remote.browsers),
+        browser_relays: merge_rows(&local.browser_relays, &remote.browser_relays),
+        browser_trust: merge_rows(&local.browser_trust, &remote.browser_trust),
     }
 }
 

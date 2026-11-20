@@ -31,6 +31,9 @@ pub fn canonical_shared_document(document: &SharedDocument) -> String {
             if let Some(custody_at) = identity.custody_at {
                 row.insert("custodyAt".into(), json!(custody_at));
             }
+            if let Some(site) = &identity.site {
+                row.insert("site".into(), json!(site));
+            }
             Value::Object(row)
         })
         .collect();

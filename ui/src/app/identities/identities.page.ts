@@ -34,7 +34,22 @@ import { IdentityAvatar } from './identity-avatar';
         </div>
       }
 
-      @for (identity of core.identities(); track identity.id) {
+      @if (siteIdentities().length && regular().length) {
+        <div class="group-head">
+          <button
+            type="button"
+            class="group-toggle"
+            data-action="toggle-regular-identities"
+            [attr.aria-expanded]="regularOpen()"
+            (click)="regularOpen.set(!regularOpen())"
+          >
+            <i class="bi" [class.bi-chevron-right]="!regularOpen()" [class.bi-chevron-down]="regularOpen()"></i>
+            <span>Regular identities</span>
+          </button>
+          <span class="count">{{ regular().length }}</span>
+        </div>
+      }
+      @for (identity of (regularOpen() || !siteIdentities().length ? regular() : []); track identity.id) {
         <a
           class="identity"
           [routerLink]="['/identities', identity.id]"
@@ -55,10 +70,51 @@ import { IdentityAvatar } from './identity-avatar';
           <i class="bi bi-chevron-right"></i>
         </a>
       } @empty {
-        <div class="sam-card empty-card">
-          <p class="title">No identity yet</p>
-          <p class="copy">Create one with a new key, or import a key you already have.</p>
+        @if (!siteIdentities().length && !regular().length) {
+          <div class="sam-card empty-card">
+            <p class="title">No identity yet</p>
+            <p class="copy">Create one with a new key, or import a key you already have.</p>
+          </div>
+        }
+      }
+
+      @if (siteIdentities().length) {
+        <div class="group-head">
+          <button
+            type="button"
+            class="group-toggle"
+            data-action="toggle-site-identities"
+            [attr.aria-expanded]="siteOpen()"
+            (click)="siteOpen.set(!siteOpen())"
+          >
+            <i class="bi" [class.bi-chevron-right]="!siteOpen()" [class.bi-chevron-down]="siteOpen()"></i>
+            <span>Site-only identities</span>
+          </button>
+          <i
+            class="bi bi-info-circle info"
+            tabindex="0"
+            aria-label="What are site-only identities?"
+            appTooltip="Each identity was created with “New site-only identity” for a specific website to test that site without your regular identities. Delete them when you are done or choose to keep them as regular identities."
+          ></i>
+          <span class="count">{{ siteIdentities().length }}</span>
         </div>
+        @if (siteOpen()) {
+          @for (identity of siteIdentities(); track identity.id) {
+            <a
+              class="identity"
+              [routerLink]="['/identities', identity.id]"
+              [style.border-left-color]="color(identity.pubkey, identity.color)"
+            >
+              <app-identity-avatar [pubkey]="identity.pubkey" [color]="identity.color" [size]="32" />
+              <span class="nick">{{ identity.nick }}</span>
+              @if (identity.nick !== identity.site) {
+                <span class="badge-bunker">{{ identity.site }}</span>
+              }
+              <span class="npub">{{ short(identity.npub) }}</span>
+              <i class="bi bi-chevron-right"></i>
+            </a>
+          }
+        }
       }
     </div>
   `,
@@ -115,6 +171,51 @@ import { IdentityAvatar } from './identity-avatar';
     .bi-chevron-right {
       color: var(--muted);
     }
+
+    .group-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+
+      .count {
+        margin-left: auto;
+      }
+    }
+
+    .group-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 2px;
+      border: 0;
+      background: none;
+      color: inherit;
+      font: inherit;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+
+      &:hover {
+        color: #ffffff;
+      }
+
+      .bi-chevron-right,
+      .bi-chevron-down {
+        color: inherit;
+      }
+    }
+
+    .info {
+      cursor: help;
+
+      &:hover,
+      &:focus-visible {
+        color: #ffffff;
+      }
+    }
   `,
 })
 export class IdentitiesPage {
@@ -122,6 +223,11 @@ export class IdentitiesPage {
   protected readonly color = colorForPubkey;
   protected readonly short = shortNpub;
   protected readonly serving = signal(false);
+  /** Site-only identities: made in a browser with "New site-only identity". The group starts open. */
+  protected readonly regular = computed(() => this.core.identities().filter((i) => !i.site));
+  protected readonly siteIdentities = computed(() => this.core.identities().filter((i) => !!i.site));
+  protected readonly siteOpen = signal(true);
+  protected readonly regularOpen = signal(true);
   protected readonly serveError = signal('');
   protected readonly servedElsewhere = computed(() => this.core.identities().filter((i) => i.servedElsewhere));
   protected readonly servedTitle = computed(() => {

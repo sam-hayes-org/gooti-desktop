@@ -268,6 +268,49 @@ async fn an_app_connects_signs_encrypts_and_logs_out() {
         "an answered request is gone"
     );
 
+    // An app that stops waiting (Primal, after about 8 seconds) sends the same event again, with
+    // a new time: no second window, listed once as asked twice, and one Approve answers both.
+    let deletion = r#"{"kind":5,"content":"Deleted by the author","tags":[["e","aa"],["k","1"]],"created_at":1700000000}"#;
+    let first = app.send("sign_event", &[deletion]).await;
+    let ask = desktop.next_ask().await;
+    let again = deletion.replace("1700000000", "1700000009");
+    let second = app.send("sign_event", &[&again]).await;
+    for _ in 0..100 {
+        if desktop
+            .service
+            .pending()
+            .first()
+            .is_some_and(|p| p.times == 2)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let pending = desktop.service.pending();
+    assert_eq!(pending.len(), 1, "the repeat is not listed twice");
+    assert_eq!(pending[0].times, 2);
+    while let Ok(notice) = desktop.notices.try_recv() {
+        assert!(
+            !matches!(notice, Notice::Asked { .. }),
+            "the repeat opens no window of its own"
+        );
+    }
+    desktop
+        .service
+        .decide(&ask.key, true, Remember::Once)
+        .unwrap();
+    for (id, time) in [(&first, 1_700_000_000), (&second, 1_700_000_009)] {
+        let answer = app.answer(id).await;
+        let signed: Event = serde_json::from_str(answer["result"].as_str().unwrap()).unwrap();
+        signed.verify().unwrap();
+        assert_eq!(
+            signed.created_at.as_secs(),
+            time,
+            "each gets its own signature"
+        );
+    }
+    assert!(desktop.service.pending().is_empty());
+
     // Encrypting for someone else.
     let peer = Keys::generate();
     let peer_hex = peer.public_key().to_hex();
@@ -588,14 +631,14 @@ async fn remembered_choices_and_trust_levels_answer_without_asking_and_are_logge
     assert_eq!(activity[0]["app"], "Notes app");
 }
 
-/// Against the real relay: publishes a few kind 24133 messages. Run on request:
+/// Against the test relay (test.getgooti.com, same software and policy as relay.getgooti.com):
+/// publishes a few kind 24133 messages. Run on request:
 /// `cargo test -p gooti-core --test bunker_flow -- --ignored`
-/// (`GOOTI_BUNKER_RELAY` picks another relay).
+/// (`GOOTI_TEST_RELAY` picks another relay).
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "talks to relay.getgooti.com"]
-async fn two_identities_answer_over_relay_getgooti_com() {
-    let relay = std::env::var("GOOTI_BUNKER_RELAY")
-        .unwrap_or_else(|_| "wss://relay.getgooti.com".to_string());
+#[ignore = "talks to test.getgooti.com"]
+async fn two_identities_answer_over_the_test_relay() {
+    let relay = common::test_relay();
     let _ = rustls::crypto::ring::default_provider().install_default();
     let desktop = Desktop::start(&relay);
     let bob = desktop

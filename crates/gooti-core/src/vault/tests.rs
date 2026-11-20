@@ -519,6 +519,7 @@ fn bunker_row() -> SharedIdentity {
             extra: Default::default(),
         }),
         custody_at: None,
+        site: None,
         extra: Default::default(),
     }
 }
@@ -609,24 +610,29 @@ fn a_desktop_only_identity_syncs_a_pointer_never_its_key() {
     let signer = vault.bunker_signer(&alice.pubkey).unwrap().unwrap();
     assert_eq!(pointer.pubkey, signer.public_key().to_hex());
     assert_eq!(pointer.relays, ["wss://relay.getgooti.com"]);
-    assert_eq!(pointer.secret, None);
-    assert!(pointer.client_secret_key.is_some());
+    // The secret a browser's `connect` needs, derived from the key: no key in it, and the same on
+    // every Gooti Desktop.
+    assert_eq!(
+        pointer.secret.as_deref(),
+        Some(crate::bunker::state::browser_secret(HEX).as_str())
+    );
+    assert!(!pointer.secret.as_deref().unwrap().contains(HEX));
+    // Browsers sign with their own key: the pointer carries no shared one.
+    assert!(pointer.client_secret_key.is_none());
     assert!(valid_for_the_extension(&document));
     assert!(!serde_json::to_string(&document).unwrap().contains(HEX));
 
-    // Browsers reach it through one connection, Basic, without a link.
+    // No browser until one is allowed; then it has a connection, Basic, without a link.
+    assert!(vault.bunker_info().unwrap().connections.is_empty());
+    let laptop = allow_test_browser(&mut vault, &alice.pubkey);
     let info = vault.bunker_info().unwrap();
     assert_eq!(info.connections.len(), 1);
     let browsers = &info.connections[0];
     assert!(browsers.browsers);
-    assert_eq!(browsers.name.as_deref(), Some("Gooti browsers"));
+    assert_eq!(browsers.name.as_deref(), Some("Work laptop"));
     assert_eq!(browsers.trust, crate::bunker::policy::Trust::Basic);
-    let client =
-        nostr::key::SecretKey::from_hex(pointer.client_secret_key.as_ref().unwrap()).unwrap();
-    assert_eq!(
-        browsers.client_pubkey,
-        nostr::key::Keys::new(client).public_key().to_hex()
-    );
+    assert_eq!(browsers.client_pubkey, laptop);
+    assert_eq!(browsers.relays, pointer.relays);
     assert!(matches!(
         vault.bunker_revoke(&browsers.id),
         Err(Error::BrowsersConnection)
@@ -654,6 +660,7 @@ fn desktop_only_needs_a_wss_bunker_relay() {
     let alice = vault
         .add_identity_as("Alice", NewKey::Generate, Custody::Desktop)
         .unwrap();
+    allow_test_browser(&mut vault, &alice.pubkey);
     // The default relays may change freely: Alice's browsers keep theirs.
     vault
         .bunker_set_relays(&["ws://127.0.0.1:7777".into()])
@@ -866,6 +873,7 @@ fn new_bunker_relays_reach_the_pointer_with_a_newer_stamp() {
     let alice = vault
         .add_identity_as("Alice", NewKey::Generate, Custody::Desktop)
         .unwrap();
+    allow_test_browser(&mut vault, &alice.pubkey);
     let before = row(&vault.shared_plan().unwrap().document, &alice.pubkey).clone();
     std::thread::sleep(std::time::Duration::from_millis(3));
     // A new default changes nothing that exists.
@@ -955,4 +963,388 @@ fn an_edit_wins_over_the_row_it_edits_even_when_that_row_is_from_the_future() {
     let row = vault.shared_plan().unwrap().document.identities[0].clone();
     assert_eq!(row.nick, "Mine");
     assert!(row.updated_at > ahead);
+}
+
+#[test]
+fn a_site_identity_from_a_browser_stays_one_until_kept_as_regular() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = unlocked_vault(&dir);
+    let alice = import(&mut vault, "primal.net", HEX).unwrap();
+    vault.enable_backup(PHRASE, &relays()).unwrap();
+
+    // A browser marked it as the site-only identity it made for primal.net.
+    let plan = vault.shared_plan().unwrap();
+    let mut remote = plan.document.clone();
+    remote.identities[0].site = Some("primal.net".into());
+    remote.identities[0].updated_at += 1000.0;
+    let merged = merge_shared_documents(&plan.document, &remote);
+    assert_eq!(
+        vault.finish_shared(plan.revision, merged).unwrap(),
+        Applied::Done
+    );
+    assert_eq!(
+        vault.identity(&alice.id).unwrap().site.as_deref(),
+        Some("primal.net")
+    );
+    // The desktop publishes it again with the mark, and survives a lock.
+    let (projected, _) = vault.shared_plan().map(|p| (p.document, ())).unwrap();
+    assert_eq!(projected.identities[0].site.as_deref(), Some("primal.net"));
+    vault.lock();
+    vault.unlock("1234").unwrap();
+    assert_eq!(
+        vault.identity(&alice.id).unwrap().site.as_deref(),
+        Some("primal.net")
+    );
+
+    let before = shared_document_of(&vault).identities[0].updated_at;
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    let kept = vault.keep_as_regular_identity(&alice.id).unwrap();
+    assert_eq!(kept.site, None);
+    let row = shared_document_of(&vault).identities[0].clone();
+    assert_eq!(row.site, None);
+    assert!(row.updated_at > before);
+}
+
+#[test]
+fn a_site_that_is_not_a_host_makes_the_document_invalid() {
+    use crate::backup::document::parse_shared_document;
+    let row = |site: serde_json::Value| {
+        serde_json::json!({
+            "v": 2,
+            "identities": [{
+                "pubkey": crate::identity::pubkey_for_privkey(HEX).unwrap(),
+                "privkey": HEX,
+                "nick": "Ada",
+                "createdAt": "2026-01-01T00:00:00.000Z",
+                "updatedAt": 1,
+                "site": site,
+            }],
+            "permissions": [],
+            "relays": [],
+        })
+    };
+    let ok = parse_shared_document(row("primal.net:8080".into())).unwrap();
+    assert_eq!(ok.identities[0].site.as_deref(), Some("primal.net:8080"));
+    for bad in [
+        serde_json::json!(""),
+        serde_json::json!("a b"),
+        serde_json::json!("a/b"),
+        serde_json::json!(7),
+    ] {
+        assert!(parse_shared_document(row(bad.clone())).is_none(), "{bad}");
+    }
+}
+
+#[test]
+fn browsers_with_their_own_key_are_allowed_and_disconnected_without_a_shared_key() {
+    use crate::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
+    use crate::bunker::message::Scheme;
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = unlocked_vault(&dir);
+    vault.enable_backup(PHRASE, &relays()).unwrap();
+    let alice = vault
+        .add_identity_as(
+            "Alice",
+            NewKey::Import {
+                key: HEX,
+                password: None,
+            },
+            Custody::Desktop,
+        )
+        .unwrap();
+    let signer = vault.bunker_signer(&alice.pubkey).unwrap().unwrap();
+    // No shared browser key: the pointer carries none, and no browser is connected yet.
+    let pointer = row(&vault.shared_plan().unwrap().document, &alice.pubkey)
+        .bunker
+        .clone()
+        .unwrap();
+    assert!(pointer.client_secret_key.is_none());
+    assert!(vault.bunker_info().unwrap().connections.is_empty());
+    // Still listening for Alice, on her pointer's relays: browsers can ask.
+    let listen = vault.bunker_listen();
+    assert_eq!(listen.signer_pubkeys, [signer.public_key().to_hex()]);
+    assert_eq!(listen.relays, pointer.relays);
+    let laptop = nostr::key::Keys::generate().public_key().to_hex();
+    let ask = Ask {
+        key: "k".into(),
+        request_id: "r".into(),
+        connection_id: String::new(),
+        identity_pubkey: alice.pubkey.clone(),
+        client_pubkey: laptop.clone(),
+        signer_pubkey: signer.public_key().to_hex(),
+        method: BROWSER_CONNECT.into(),
+        params: Vec::new(),
+        scheme: Scheme::Nip44,
+        received_at: 0,
+        details: AskDetails {
+            browser: Some(BrowserAsk {
+                name: "Work laptop".into(),
+                code: crate::bunker::state::browser_code(&laptop),
+            }),
+            ..AskDetails::default()
+        },
+    };
+
+    // Allow: the browser is listed with its code and gets a connection for Alice.
+    vault.bunker_allow_browser(&ask).unwrap();
+    let list = vault.bunker_browsers().unwrap();
+    assert_eq!(list.browsers.len(), 1);
+    assert_eq!(list.browsers[0].name, "Work laptop");
+    assert_eq!(
+        list.browsers[0].code,
+        crate::bunker::state::browser_code(&laptop)
+    );
+    let connections = vault.bunker_info().unwrap().connections;
+    assert_eq!(connections.len(), 1);
+    assert_eq!(connections[0].client_pubkey, laptop);
+    assert!(connections[0].browsers);
+
+    // A new Desktop only identity is open to the approved laptop at once.
+    let bob = vault
+        .add_identity_as("Bob", NewKey::Generate, Custody::Desktop)
+        .unwrap();
+    let connections = vault.bunker_info().unwrap().connections;
+    assert!(
+        connections
+            .iter()
+            .any(|c| c.client_pubkey == laptop && c.identity_nick == "Bob")
+    );
+    assert!(
+        row(&vault.shared_plan().unwrap().document, &bob.pubkey)
+            .bunker
+            .as_ref()
+            .unwrap()
+            .client_secret_key
+            .is_none()
+    );
+
+    // Disconnect the laptop: no connection is left, and it stays blocked.
+    vault.bunker_disconnect_browser(&laptop).unwrap();
+    assert!(vault.bunker_browsers().unwrap().browsers.is_empty());
+    assert!(vault.bunker_info().unwrap().connections.is_empty());
+    assert!(matches!(
+        vault.bunker_disconnect_browser(&laptop),
+        Err(Error::ConnectionNotFound)
+    ));
+    // Both Desktop only identities still listen for browsers, with no connection left.
+    let listen = vault.bunker_listen();
+    assert_eq!(listen.signer_pubkeys.len(), 2);
+    assert!(!listen.relays.is_empty());
+}
+
+/// Allow on a browser's request, as if pressed on the desktop. Returns the browser's key.
+fn allow_test_browser(vault: &mut Vault, identity_pubkey: &str) -> String {
+    use crate::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
+    use crate::bunker::message::Scheme;
+    let browser = nostr::key::Keys::generate().public_key().to_hex();
+    vault
+        .bunker_allow_browser(&Ask {
+            key: "k".into(),
+            request_id: "r".into(),
+            connection_id: String::new(),
+            identity_pubkey: identity_pubkey.to_string(),
+            client_pubkey: browser.clone(),
+            signer_pubkey: String::new(),
+            method: BROWSER_CONNECT.into(),
+            params: Vec::new(),
+            scheme: Scheme::Nip44,
+            received_at: 0,
+            details: AskDetails {
+                browser: Some(BrowserAsk {
+                    name: "Work laptop".into(),
+                    code: String::new(),
+                }),
+                ..AskDetails::default()
+            },
+        })
+        .unwrap();
+    browser
+}
+
+#[test]
+fn a_desktop_only_identity_sets_trust_and_relays_for_all_its_browsers() {
+    use crate::bunker::policy::Trust;
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = unlocked_vault(&dir);
+    vault.enable_backup(PHRASE, &relays()).unwrap();
+    let alice = vault
+        .add_identity_as("Alice", NewKey::Generate, Custody::Desktop)
+        .unwrap();
+    let start = vault.bunker_identity_browsers(&alice.id).unwrap();
+    assert_eq!(start.trust, Trust::Basic);
+    assert_eq!(start.relays, ["wss://relay.getgooti.com"]);
+    let laptop = allow_test_browser(&mut vault, &alice.pubkey);
+
+    // Ask every time: the laptop's connection follows, and so does a browser allowed later.
+    let set = vault
+        .bunker_set_identity_browser_trust(&alice.id, Trust::Ask)
+        .unwrap();
+    assert_eq!(set.trust, Trust::Ask);
+    let home = allow_test_browser(&mut vault, &alice.pubkey);
+    let connections = vault.bunker_info().unwrap().connections;
+    for browser in [&laptop, &home] {
+        let connection = connections
+            .iter()
+            .find(|c| c.client_pubkey == *browser)
+            .unwrap();
+        assert_eq!(connection.trust, Trust::Ask);
+    }
+
+    // New relays: every browser's connection and the pointer the backup carries.
+    let set = vault
+        .bunker_set_identity_browser_relays(&alice.id, &["wss://new.example".into()])
+        .unwrap();
+    assert_eq!(set.relays, ["wss://new.example"]);
+    assert!(
+        vault
+            .bunker_info()
+            .unwrap()
+            .connections
+            .iter()
+            .all(|c| c.relays == ["wss://new.example"])
+    );
+    let pointer = row(&vault.shared_plan().unwrap().document, &alice.pubkey)
+        .bunker
+        .clone()
+        .unwrap();
+    assert_eq!(pointer.relays, ["wss://new.example"]);
+    assert!(matches!(
+        vault.bunker_set_identity_browser_relays(&alice.id, &["ws://127.0.0.1:7777".into()]),
+        Err(Error::NoBrowserRelay)
+    ));
+
+    // A choice remembered in the approval window for one browser is listed with that browser,
+    // and Forget on its connection removes it. An expired one is not listed.
+    let laptop_connection = vault
+        .bunker_info()
+        .unwrap()
+        .connections
+        .iter()
+        .find(|c| c.client_pubkey == laptop)
+        .unwrap()
+        .id
+        .clone();
+    let remembered = |kind: u16, expires_at: Option<i64>| crate::bunker::policy::Rule {
+        method: "sign_event".into(),
+        kind: Some(kind),
+        policy: crate::bunker::policy::Policy::Allow,
+        created_at: 1,
+        expires_at,
+    };
+    vault
+        .bunker_remember(&laptop_connection, remembered(1, None))
+        .unwrap();
+    vault
+        .bunker_remember(&laptop_connection, remembered(7, Some(2)))
+        .unwrap();
+    let rules = vault.bunker_identity_browsers(&alice.id).unwrap().rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].browser, "Work laptop");
+    assert_eq!(rules[0].connection_id, laptop_connection);
+    assert_eq!(rules[0].rule.kind, Some(1));
+    vault
+        .bunker_forget(&laptop_connection, "sign_event", Some(1))
+        .unwrap();
+    assert!(
+        vault
+            .bunker_identity_browsers(&alice.id)
+            .unwrap()
+            .rules
+            .is_empty()
+    );
+
+    // Only a Desktop only identity has these.
+    let bob = vault.add_identity("Bob", NewKey::Generate).unwrap();
+    assert!(matches!(
+        vault.bunker_identity_browsers(&bob.id),
+        Err(Error::NotDesktopOnly)
+    ));
+}
+
+#[test]
+fn blocked_browsers_are_forgotten_after_ninety_days_here_and_in_the_desktop_record() {
+    use crate::backup::desktop::{DesktopDocument, put};
+    use crate::bunker::state::{BLOCKED_KEPT_MS, BrowserDevice};
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = unlocked_vault(&dir);
+    let alice = vault
+        .add_identity_as("Alice", NewKey::Generate, Custody::Desktop)
+        .unwrap();
+    let recent = allow_test_browser(&mut vault, &alice.pubkey);
+    let old = allow_test_browser(&mut vault, &alice.pubkey);
+    vault.bunker_disconnect_browser(&recent).unwrap();
+    vault.bunker_disconnect_browser(&old).unwrap();
+    let now = crate::time::now_ms();
+    let undated = "cd".repeat(32);
+    {
+        let bunker = &mut vault.unlocked_mut().unwrap().data.bunker;
+        let blocked = bunker
+            .browsers
+            .iter_mut()
+            .find(|b| b.client_pubkey == old)
+            .unwrap();
+        assert!(blocked.blocked_at.is_some());
+        blocked.blocked_at = Some(now - BLOCKED_KEPT_MS - 1);
+        // Blocked before blocks had a date.
+        bunker.browsers.push(BrowserDevice {
+            client_pubkey: undated.clone(),
+            name: "Old laptop".into(),
+            approved_at: None,
+            blocked: true,
+            blocked_at: None,
+        });
+    }
+    vault.save().unwrap();
+    vault.lock();
+    vault.unlock("1234").unwrap();
+
+    let browsers = vault.unlocked().unwrap().data.bunker.browsers.clone();
+    assert!(
+        browsers
+            .iter()
+            .any(|b| b.client_pubkey == recent && b.blocked)
+    );
+    assert!(
+        !browsers.iter().any(|b| b.client_pubkey == old),
+        "older than 90 days"
+    );
+    let dated = browsers
+        .iter()
+        .find(|b| b.client_pubkey == undated)
+        .unwrap();
+    assert!(dated.blocked && dated.blocked_at.is_some());
+
+    // The desktop record still has the old block from another desktop: it is buried, not brought back.
+    let mut stored = DesktopDocument::default();
+    let expired = BrowserDevice {
+        client_pubkey: old.clone(),
+        name: "Work laptop".into(),
+        approved_at: Some(1),
+        blocked: true,
+        blocked_at: Some(now - BLOCKED_KEPT_MS - 1),
+    };
+    put(&mut stored.browsers, &old, expired, 1.0);
+    let (projected, changed) =
+        super::desktop::project(vault.unlocked().unwrap(), &stored, now as f64);
+    assert!(changed);
+    assert!(projected.browsers.get(&old).unwrap().live().is_none());
+}
+
+#[test]
+fn moving_a_key_to_the_desktop_again_starts_browsers_at_basic() {
+    use crate::bunker::policy::Trust;
+    let dir = tempfile::tempdir().unwrap();
+    let mut vault = unlocked_vault(&dir);
+    let alice = vault
+        .add_identity_as("Alice", NewKey::Generate, Custody::Desktop)
+        .unwrap();
+    vault
+        .bunker_set_identity_browser_trust(&alice.id, Trust::Trust)
+        .unwrap();
+    vault.set_custody(&alice.id, Custody::Shared).unwrap();
+    vault.set_custody(&alice.id, Custody::Desktop).unwrap();
+    assert_eq!(
+        vault.bunker_identity_browsers(&alice.id).unwrap().trust,
+        Trust::Basic
+    );
 }

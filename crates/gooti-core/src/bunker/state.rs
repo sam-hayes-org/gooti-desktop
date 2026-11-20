@@ -44,6 +44,85 @@ pub struct BunkerData {
     /// Its next backup deletes them there too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed: Vec<String>,
+    /// Browsers with their own key (`docs/DESIGN-browser-keys.md`): approved or blocked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browsers: Vec<BrowserDevice>,
+    /// The shared browser key of Gooti 2.0 browsers, retired: its requests are told to update
+    /// Gooti. Browsers now sign with their own key (`docs/DESIGN-browser-keys.md`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_shared_keys: Vec<String>,
+    /// Identity → the relays browsers reach that Desktop only identity on. Its pointer names
+    /// them, and each browser's connection uses them. A change of the default relays leaves them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub browser_relays: std::collections::BTreeMap<String, Vec<String>>,
+    /// Identity → how far browsers may go for that Desktop only identity without asking. The same
+    /// for every browser; missing is Basic.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub browser_trust: std::collections::BTreeMap<String, Trust>,
+}
+
+/// A browser that asked to sign through this desktop with its own key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserDevice {
+    /// The browser's own key; the same for all identities.
+    pub client_pubkey: String,
+    pub name: String,
+    /// When Allow was pressed (ms). `None` while blocked without ever being allowed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_at: Option<i64>,
+    /// Denied or disconnected: its requests fail and it cannot ask again, for
+    /// `BLOCKED_KEPT_MS`. After that it is forgotten; a key that asks again is asked about again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blocked: bool,
+    /// When it was blocked (ms). Set at unlock for a block from before 2026-11-19.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_at: Option<i64>,
+}
+
+/// How long a denied or disconnected browser key stays blocked: long enough that a lost
+/// browser is gone for good, short enough that the list does not grow forever.
+pub const BLOCKED_KEPT_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
+impl BrowserDevice {
+    /// Blocked long enough ago to be forgotten.
+    pub fn block_expired(&self, now: i64) -> bool {
+        self.blocked
+            && self
+                .blocked_at
+                .is_some_and(|at| now - at >= BLOCKED_KEPT_MS)
+    }
+}
+
+/// What `connect` metadata says when a Gooti browser asks with its own key.
+pub const BROWSER_HINT: &str = "browser";
+
+/// The secret a browser sends with its `connect`, from the pointer in the backup. Derived from the
+/// identity's private key, so every Gooti Desktop that holds the key expects the same one, and
+/// only someone who can open the backup (the pointer is sealed inside it) knows it. Without it, anyone
+/// who sees the signer key on a relay could make this desktop ask "Allow this browser?".
+pub fn browser_secret(privkey_hex: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"gooti browser connect\0");
+    hasher.update(privkey_hex.trim().to_ascii_lowercase().as_bytes());
+    crate::backup::phrase::hex(&hasher.finalize()[..16])
+}
+
+/// "K7F-2QX": the first 30 bits of SHA-256 over the 32-byte key, in Crockford base32. The
+/// extension shows the same code for its own key, so a lost browser can be told from the others.
+pub fn browser_code(client_pubkey_hex: &str) -> String {
+    use sha2::{Digest, Sha256};
+    const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let bytes: Vec<u8> = (0..client_pubkey_hex.len() / 2)
+        .filter_map(|i| u8::from_str_radix(client_pubkey_hex.get(i * 2..i * 2 + 2)?, 16).ok())
+        .collect();
+    let hash = Sha256::digest(&bytes);
+    let bits = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]) >> 2;
+    let chars: String = (0..6)
+        .map(|i| ALPHABET[((bits >> (25 - i * 5)) & 31) as usize] as char)
+        .collect();
+    format!("{}-{}", &chars[..3], &chars[3..])
 }
 
 impl Default for BunkerData {
@@ -56,6 +135,10 @@ impl Default for BunkerData {
             connections: Vec::new(),
             relays_at: None,
             removed: Vec::new(),
+            browsers: Vec::new(),
+            retired_shared_keys: Vec::new(),
+            browser_relays: Default::default(),
+            browser_trust: Default::default(),
         }
     }
 }
@@ -85,10 +168,79 @@ impl BunkerData {
         self.keep_identities_where(|pubkey| identity_pubkeys.iter().any(|kept| kept == pubkey));
     }
 
+    /// Ends the connections of the shared browser key (Gooti 2.0 browsers, or one that came from
+    /// an older Gooti Desktop) and remembers the key, so its requests are told to update Gooti.
+    /// Returns whether anything changed.
+    pub fn retire_shared_key(&mut self) -> bool {
+        let shared: Vec<(String, String)> = self
+            .connections
+            .iter()
+            .filter(|c| c.browsers && self.browser(&c.client_pubkey).is_none())
+            .map(|c| (c.id.clone(), c.client_pubkey.clone()))
+            .collect();
+        if shared.is_empty() {
+            return false;
+        }
+        // The shared connection held the identity's browser relays and trust until 2026-11-17:
+        // keep them.
+        for connection in self.connections.iter().filter(|c| c.browsers) {
+            if !connection.relays.is_empty() {
+                self.browser_relays
+                    .entry(connection.identity_pubkey.clone())
+                    .or_insert_with(|| connection.relays.clone());
+            }
+            if self.browser(&connection.client_pubkey).is_none() {
+                self.browser_trust
+                    .entry(connection.identity_pubkey.clone())
+                    .or_insert(connection.trust);
+            }
+        }
+        self.connections
+            .retain(|c| !shared.iter().any(|(id, _)| *id == c.id));
+        for (id, client) in shared {
+            self.removed.push(id);
+            if !self.retired_shared_keys.contains(&client) {
+                self.retired_shared_keys.push(client);
+            }
+        }
+        true
+    }
+
+    pub fn browser(&self, client_pubkey: &str) -> Option<&BrowserDevice> {
+        self.browsers
+            .iter()
+            .find(|b| b.client_pubkey == client_pubkey)
+    }
+
     fn keep_identities_where(&mut self, keep: impl Fn(&str) -> bool) {
         self.signers.retain(|s| keep(&s.identity_pubkey));
         self.invites.retain(|i| keep(&i.identity_pubkey));
         self.connections.retain(|c| keep(&c.identity_pubkey));
+        self.browser_relays.retain(|pubkey, _| keep(pubkey));
+        self.browser_trust.retain(|pubkey, _| keep(pubkey));
+    }
+
+    /// Dates blocks from before 2026-11-19, and forgets those older than `BLOCKED_KEPT_MS`.
+    /// Returns whether anything changed.
+    pub fn tidy_blocked_browsers(&mut self, now: i64) -> bool {
+        let mut changed = false;
+        for browser in self.browsers.iter_mut().filter(|b| b.blocked) {
+            if browser.blocked_at.is_none() {
+                browser.blocked_at = Some(now);
+                changed = true;
+            }
+        }
+        let before = self.browsers.len();
+        self.browsers.retain(|b| !b.block_expired(now));
+        changed || self.browsers.len() != before
+    }
+
+    /// How far browsers may go for this Desktop only identity without asking.
+    pub fn browser_trust_of(&self, identity_pubkey: &str) -> Trust {
+        self.browser_trust
+            .get(identity_pubkey)
+            .copied()
+            .unwrap_or(Trust::Basic)
     }
 }
 
@@ -156,13 +308,10 @@ pub struct Connection {
     /// Choices the user remembered for this app.
     #[serde(default)]
     pub rules: Vec<Rule>,
-    /// The connection every browser uses for a Desktop only identity.
+    /// A browser's connection (its own key) for a Desktop only identity.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub browsers: bool,
 }
-
-/// The name of the browsers' connection.
-pub const BROWSERS_NAME: &str = "Gooti browsers";
 
 /// Name, URL and icon an app sends with `connect`. Display hints only.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -170,6 +319,8 @@ pub struct ClientMeta {
     pub name: Option<String>,
     pub url: Option<String>,
     pub image: Option<String>,
+    /// `"browser"`: a Gooti browser asking with its own key.
+    pub gooti: Option<String>,
 }
 
 impl ClientMeta {
@@ -188,6 +339,7 @@ impl ClientMeta {
             name: field("name"),
             url: field("url"),
             image: field("image"),
+            gooti: field("gooti"),
         }
     }
 }

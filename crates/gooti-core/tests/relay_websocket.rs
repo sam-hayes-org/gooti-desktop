@@ -118,14 +118,54 @@ async fn a_relay_without_eose_ends_the_wait_with_what_it_sent() {
 }
 
 /// Reaches the real default relay over TLS. Read only: asks for a random key's vault.
-/// Run on request: `cargo test -p gooti-core --test relay_websocket -- --ignored`
 #[tokio::test]
-#[ignore]
-async fn reaches_the_default_relay_over_tls() {
+async fn fetches_every_device_record_of_the_author() {
+    use gooti_core::backup::device::{
+        DeviceApp, DeviceEntry, DeviceRecord, build_device_event, devices_from_events, seal_device,
+    };
+    let (url, _) = start_relay(Mode::Normal).await;
     let keys = derive_shared_keys(&generate_passphrase()).unwrap();
-    let relays = gooti_core::backup::flow::default_relays();
+    let io = relays(2000);
+    let relays = vec![url];
+    let record = DeviceRecord {
+        id: "0f".repeat(16),
+        name: "Gooti Desktop on Linux".into(),
+        app: DeviceApp::Desktop,
+        backed_up_at: 5.0,
+    };
+    let payload = seal_device(&DeviceEntry::Live(record.clone()), &keys.encryption_key).unwrap();
+    io.publish(
+        &relays,
+        &build_device_event(&keys, &record.id, &payload, 1_000),
+    )
+    .await
+    .unwrap();
+    io.publish(
+        &relays,
+        &build_backup_event(&keys, SHARED_D_TAG, "vault", 1_000),
+    )
+    .await
+    .unwrap();
+    let events = io.fetch_all(&relays, &keys.pubkey_hex()).await.unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(devices_from_events(&events, &keys), vec![record]);
+}
+
+/// Against the test relay (test.getgooti.com, same software and policy as relay.getgooti.com), over
+/// TLS. Reads only. Run on request: `cargo test -p gooti-core --test relay_websocket -- --ignored`
+/// (`GOOTI_TEST_RELAY` picks another relay).
+#[tokio::test]
+#[ignore = "talks to test.getgooti.com"]
+async fn reaches_the_test_relay_over_tls() {
+    let keys = derive_shared_keys(&generate_passphrase()).unwrap();
+    let relays = vec![common::test_relay()];
     let found = WebSocketRelays::default()
         .fetch_newest(&relays, &keys.pubkey_hex(), SHARED_D_TAG)
         .await;
     assert_eq!(found.unwrap(), None);
+    // "Devices" reads every event of the author, with no d tag in the filter.
+    let all = WebSocketRelays::default()
+        .fetch_all(&relays, &keys.pubkey_hex())
+        .await;
+    assert!(all.unwrap().is_empty());
 }

@@ -166,6 +166,11 @@ fn identity_calls_use_the_ui_argument_names() {
         h.ok("identity_rename", json!({ "id": id, "nick": "Robert" }))["nick"],
         "Robert"
     );
+    // A regular identity stays regular.
+    assert_eq!(
+        h.ok("identity_keep_regular", json!({ "id": id }))["site"],
+        Value::Null
+    );
     assert_eq!(
         h.ok(
             "identity_set_color",
@@ -435,6 +440,17 @@ fn bunker_calls_use_the_ui_argument_names() {
     h.ok("activity_clear", json!({}));
     assert_eq!(h.ok("activity_list", json!({})), json!([]));
 
+    // No browser with its own key yet.
+    let browsers = h.ok("bunker_browsers", json!({}));
+    assert_eq!(browsers, json!({ "browsers": [] }));
+    assert_eq!(
+        h.err(
+            "bunker_browser_disconnect",
+            json!({ "clientPubkey": "ab".repeat(32) })
+        )["code"],
+        "connection_not_found"
+    );
+
     h.ok("bunker_set_paused", json!({ "paused": true }));
     assert_eq!(h.ok("bunker_info", json!({}))["paused"], true);
     h.ok(
@@ -469,30 +485,41 @@ fn custody_calls_use_the_ui_argument_names() {
     assert_eq!(alice["custody"], "desktop");
     let id = alice["id"].as_str().unwrap();
 
-    let connections = h.ok("bunker_info", json!({}))["connections"].clone();
-    assert_eq!(connections[0]["name"], "Gooti browsers");
-    assert_eq!(connections[0]["relays"], json!(["wss://alice.example"]));
-    let browsers_id = connections[0]["id"].as_str().unwrap().to_string();
+    // No browser yet: each one connects with its own key once allowed.
+    assert_eq!(h.ok("bunker_info", json!({}))["connections"], json!([]));
+    // The arguments arrive: an unknown connection, not a missing argument.
+    let unknown = h.err(
+        "bunker_set_app_relays",
+        json!({ "connectionId": "nope", "relays": ["wss://other.example"] }),
+    );
+    assert_eq!(unknown["code"], "connection_not_found");
+
+    // Trust and relays for all of Alice's browsers, on her page.
+    let browsers = h.ok("identity_browsers", json!({ "id": id }));
     assert_eq!(
-        h.ok(
-            "bunker_set_app_relays",
-            json!({ "connectionId": browsers_id, "relays": ["wss://other.example"] }),
-        ),
-        json!(["wss://other.example"])
+        browsers,
+        json!({ "trust": "basic", "relays": ["wss://alice.example"], "rules": [] })
     );
-    assert_eq!(connections[0]["browsers"], true);
-    assert_eq!(connections[0]["trust"], "basic");
-    let refused = h.err(
-        "bunker_revoke",
-        json!({ "connectionId": connections[0]["id"].as_str().unwrap() }),
+    let browsers = h.ok(
+        "identity_set_browser_trust",
+        json!({ "id": id, "trust": "ask" }),
     );
-    assert_eq!(refused["code"], "browsers_connection");
+    assert_eq!(browsers["trust"], "ask");
+    let browsers = h.ok(
+        "identity_set_browser_relays",
+        json!({ "id": id, "relays": ["wss://other.example"] }),
+    );
+    assert_eq!(browsers["relays"], json!(["wss://other.example"]));
 
     let shared = h.ok(
         "identity_set_custody",
         json!({ "id": id, "custody": "shared", "relays": null }),
     );
     assert_eq!(shared["custody"], "shared");
+    assert_eq!(
+        h.err("identity_browsers", json!({ "id": id }))["code"],
+        "not_desktop_only"
+    );
     assert_eq!(h.ok("bunker_info", json!({}))["connections"], json!([]));
     assert_eq!(shared["servedElsewhere"], false);
     assert_eq!(shared["keyMissing"], false);

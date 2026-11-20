@@ -18,10 +18,10 @@ describe('InfoPage', () => {
     return fixture;
   };
 
-  it('shows the version, the channel and the author key', async () => {
-    core.appInfo.set({ version: '0.4.2', channel: 'alpha' });
+  it('shows the version and the author key', async () => {
+    core.appInfo.set({ version: '0.4.2' });
     const root = (await render()).nativeElement as HTMLElement;
-    expect(root.querySelector('[data-info="version"]')?.textContent?.trim()).toBe('0.4.2 (alpha)');
+    expect(root.querySelector('[data-info="version"]')?.textContent?.trim()).toBe('0.4.2');
     expect(root.querySelector<HTMLInputElement>('.sam-field input')?.value).toBe(AUTHOR_NPUB);
   });
 

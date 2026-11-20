@@ -1,6 +1,8 @@
 // The extension's real NIP-46 client against the desktop bunker, for
 // crates/gooti-core/tests/e2e_extension.rs. Prints what it got as JSON.
-//   bunker <bunker:// link>
+//   bunker <bunker:// link> <ws:// test relay>
+// The extension accepts only wss:// relays from a link, and the test relay on localhost is plain
+// ws://. So the link names wss://relay.invalid, and this pool connects there to the test relay.
 import { verifyEvent } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import {
@@ -11,9 +13,19 @@ import {
   connectBunker,
 } from '@ext/nip46/client';
 
+class TestRelayPool extends SimplePool {
+  constructor(private readonly local: string) {
+    super();
+  }
+
+  override ensureRelay(url: string, params?: Parameters<SimplePool['ensureRelay']>[1]) {
+    return super.ensureRelay(url.includes('relay.invalid') ? this.local : url, params);
+  }
+}
+
 async function main() {
   const link = process.argv[2];
-  const pool = new SimplePool();
+  const pool = new TestRelayPool(process.argv[3]);
   const options = { pool, timeoutMs: 15_000 };
   const connected = await connectBunker(link, options);
   const { clientSecretKeyHex, bunker } = connected;

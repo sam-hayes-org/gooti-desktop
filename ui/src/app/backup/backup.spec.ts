@@ -122,4 +122,37 @@ describe('BackupPage', () => {
     expect(formatVaultSize(56_789)).toBe('57 KB');
     expect(formatVaultSize(1_500_000)).toBe('1.5 MB');
   });
+
+  it('lists the devices, renames this desktop and removes another after the confirmation', async () => {
+    core.backup = { relays: ['wss://relay.getgooti.com'], autoBackup: false, contentChars: 1234, desktopCurrent: true };
+    const { fixture, root } = await render();
+    await settle(fixture);
+    expect(text(root)).toContain('Devices');
+    expect(text(root)).toContain('Gooti Desktop on Linux');
+    expect(text(root)).toContain('This desktop · Shows up here after its next backup');
+    expect(text(root)).toContain('Firefox on Linux');
+    expect(text(root)).toContain('Backed up today');
+
+    button(root, 'Rename').click();
+    await settle(fixture);
+    const input = root.querySelector('input[name="deviceName"]') as HTMLInputElement;
+    input.value = '  Office PC ';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    button(root, 'Save').click();
+    await settle(fixture);
+    expect(core.renameDevice).toHaveBeenCalledExactlyOnceWith('  Office PC ');
+    expect(text(root)).toContain('Office PC');
+
+    const confirm = TestBed.inject(ConfirmService);
+    button(root, 'Remove from list').click();
+    await settle(fixture);
+    expect(confirm.pending()?.message).toBe(
+      'Remove “Firefox on Linux” from the list? It shows up again if it backs up. To stop a lost browser from signing through this desktop, disconnect it under Connections → Browsers.',
+    );
+    confirm.answer(true);
+    await settle(fixture);
+    expect(core.removeDevice).toHaveBeenCalledExactlyOnceWith('bb'.repeat(16));
+    expect(text(root)).not.toContain('Firefox on Linux');
+  });
 });

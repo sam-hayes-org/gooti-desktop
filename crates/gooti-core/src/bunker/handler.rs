@@ -9,7 +9,10 @@ use serde::Serialize;
 
 use super::message::{Incoming, Response, Scheme};
 use super::policy::{Reason, Trust, Verdict, evaluate};
-use super::state::{BunkerData, ClientMeta, Connection, INVITE_LIFETIME_MS};
+use super::state::{
+    BROWSER_HINT, BrowserDevice, BunkerData, ClientMeta, Connection, INVITE_LIFETIME_MS,
+    browser_code,
+};
 
 /// Methods that sign or read on the identity's behalf. Each one asks the user (M3).
 pub const ASKING_METHODS: [&str; 5] = [
@@ -55,6 +58,30 @@ pub struct Ask {
     pub details: AskDetails,
 }
 
+impl Ask {
+    /// The same request again, as an app sends it when it stops waiting and retries (Primal gives
+    /// up after about 8 seconds): same app, identity and method, and the same event apart from its
+    /// time, or the same text to encrypt or decrypt. One answer covers both.
+    pub fn same_request(&self, other: &Ask) -> bool {
+        if self.method == BROWSER_CONNECT
+            || self.method != other.method
+            || self.connection_id != other.connection_id
+            || self.client_pubkey != other.client_pubkey
+            || self.identity_pubkey != other.identity_pubkey
+            || self.details.site != other.details.site
+        {
+            return false;
+        }
+        if self.method == "sign_event" {
+            self.details.kind == other.details.kind
+                && self.details.content == other.details.content
+                && self.details.tags == other.details.tags
+        } else {
+            self.params == other.params
+        }
+    }
+}
+
 /// What the approval prompt shows.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,15 +96,43 @@ pub struct AskDetails {
     /// connection; other apps cannot set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub site: Option<String>,
+    /// A Gooti browser asking to sign through this desktop with its own key (method `connect`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserAsk>,
 }
 
+/// What the approval window shows for a browser that asks to connect.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserAsk {
+    pub name: String,
+    pub code: String,
+}
+
+/// The method of a browser's request to connect, as an `Ask`.
+pub const BROWSER_CONNECT: &str = "connect";
+
+/// Sent to a browser that was denied or disconnected. The extension makes a new key on it.
+pub const BROWSER_DISCONNECTED: &str = "Gooti Desktop disconnected this browser.";
+
+/// Sent to a browser `connect` without the secret from the backup, or for an identity that is not
+/// Desktop only. No question is asked.
+pub const BROWSER_NOT_KNOWN: &str =
+    "Gooti Desktop does not know this request. Back up in this browser, then open Gooti again.";
+
+/// Sent to a Gooti 2.0 browser, which still signs with the retired shared key.
+pub const BROWSER_UPDATE: &str = "Update Gooti in this browser to sign through Gooti Desktop.";
+
 /// Handles a request addressed to the signer key of `identity_pubkey`.
-/// `has_private_key` is false for identities this desktop cannot sign for.
+/// `has_private_key` is false for identities this desktop cannot sign for. `browser_secret` is
+/// what a browser must send with `connect` (`state::browser_secret`), and `None` for an identity
+/// that is not Desktop only: browsers do not connect to those.
 /// Returns whether `data` changed and must be saved.
 pub fn handle(
     data: &mut BunkerData,
     identity_pubkey: &str,
     has_private_key: bool,
+    browser_secret: Option<&str>,
     signer_pubkey: &str,
     incoming: &Incoming,
     now: i64,
@@ -95,7 +150,14 @@ pub fn handle(
     }
 
     if request.method == "connect" {
-        return connect(data, identity_pubkey, signer_pubkey, incoming, now);
+        return connect(
+            data,
+            identity_pubkey,
+            browser_secret,
+            signer_pubkey,
+            incoming,
+            now,
+        );
     }
 
     let Some(connection) = data
@@ -103,10 +165,15 @@ pub fn handle(
         .iter_mut()
         .find(|c| c.client_pubkey == *client && c.identity_pubkey == identity_pubkey)
     else {
-        return (
-            reply_error(request, "Not connected. Connect to this bunker first."),
-            false,
-        );
+        // A disconnected browser learns so, and makes a new key to ask again.
+        let text = if data.browser(client).is_some_and(|b| b.blocked) {
+            BROWSER_DISCONNECTED
+        } else if data.retired_shared_keys.contains(client) {
+            BROWSER_UPDATE
+        } else {
+            "Not connected. Connect to this bunker first."
+        };
+        return (reply_error(request, text), false);
     };
     // "Last used" is saved at most once a minute, so a busy app does not rewrite the vault.
     let mut changed = connection
@@ -181,6 +248,7 @@ fn decide(connection: &Connection, now: i64, ask: Box<Ask>) -> Outcome {
 fn connect(
     data: &mut BunkerData,
     identity_pubkey: &str,
+    browser_secret: Option<&str>,
     signer_pubkey: &str,
     incoming: &Incoming,
     now: i64,
@@ -203,6 +271,25 @@ fn connect(
     {
         return (Outcome::Reply(Response::ok(&request.id, "ack")), false);
     }
+    let meta = request
+        .params
+        .get(3)
+        .map(|m| ClientMeta::from_json(m))
+        .unwrap_or_default();
+    if meta.gooti.as_deref() == Some(BROWSER_HINT) {
+        // Only a browser that opened the backup knows the secret: the pointer carries it. A
+        // blocked key learns so either way, and makes a new one.
+        let sent = request.params.get(1).map(|s| s.trim()).unwrap_or("");
+        let known = browser_secret.is_some_and(|expected| same_secret(sent, expected));
+        if !known
+            && !data
+                .browser(&incoming.client_pubkey)
+                .is_some_and(|b| b.blocked)
+        {
+            return (reply_error(request, BROWSER_NOT_KNOWN), false);
+        }
+        return browser_connect(data, identity_pubkey, signer_pubkey, incoming, meta, now);
+    }
     let secret = request
         .params
         .get(1)
@@ -222,11 +309,6 @@ fn connect(
         );
     };
     let invite = data.invites.remove(at);
-    let meta = request
-        .params
-        .get(3)
-        .map(|m| ClientMeta::from_json(m))
-        .unwrap_or_default();
     data.connections.push(Connection {
         id: uuid::Uuid::new_v4().to_string(),
         identity_pubkey: identity_pubkey.to_string(),
@@ -248,6 +330,111 @@ fn connect(
         browsers: false,
     });
     (Outcome::Reply(Response::ok(&request.id, "ack")), true)
+}
+
+/// Compares without stopping at the first difference.
+fn same_secret(sent: &str, expected: &str) -> bool {
+    sent.len() == expected.len()
+        && sent
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+/// A Gooti browser with its own key: an approved one connects at once, a blocked one is refused,
+/// and any other waits for Allow on this desktop (`docs/DESIGN-browser-keys.md`).
+fn browser_connect(
+    data: &mut BunkerData,
+    identity_pubkey: &str,
+    signer_pubkey: &str,
+    incoming: &Incoming,
+    meta: ClientMeta,
+    now: i64,
+) -> (Outcome, bool) {
+    let request = &incoming.request;
+    let client = &incoming.client_pubkey;
+    let known = data.browser(client).cloned();
+    match known {
+        Some(browser) if browser.blocked => (reply_error(request, BROWSER_DISCONNECTED), false),
+        Some(browser) if browser.approved_at.is_some() => {
+            add_browser_connection(data, identity_pubkey, &browser, now);
+            (Outcome::Reply(Response::ok(&request.id, "ack")), true)
+        }
+        _ => {
+            let name = meta.name.unwrap_or_else(|| "A browser".to_string());
+            (
+                Outcome::Ask(Box::new(Ask {
+                    key: uuid::Uuid::new_v4().to_string(),
+                    request_id: request.id.clone(),
+                    connection_id: String::new(),
+                    identity_pubkey: identity_pubkey.to_string(),
+                    client_pubkey: client.clone(),
+                    signer_pubkey: signer_pubkey.to_string(),
+                    method: BROWSER_CONNECT.to_string(),
+                    params: Vec::new(),
+                    scheme: incoming.scheme,
+                    received_at: now,
+                    details: AskDetails {
+                        browser: Some(BrowserAsk {
+                            code: browser_code(client),
+                            name,
+                        }),
+                        ..AskDetails::default()
+                    },
+                })),
+                false,
+            )
+        }
+    }
+}
+
+/// The connection of an approved browser for one identity, with the browser's name and trust.
+pub fn add_browser_connection(
+    data: &mut BunkerData,
+    identity_pubkey: &str,
+    browser: &BrowserDevice,
+    now: i64,
+) {
+    if data
+        .connections
+        .iter()
+        .any(|c| c.client_pubkey == browser.client_pubkey && c.identity_pubkey == identity_pubkey)
+    {
+        return;
+    }
+    let relays = browser_relays(data, identity_pubkey);
+    data.connections.push(Connection {
+        id: uuid::Uuid::new_v4().to_string(),
+        identity_pubkey: identity_pubkey.to_string(),
+        client_pubkey: browser.client_pubkey.clone(),
+        relays,
+        name: Some(browser.name.clone()),
+        url: None,
+        image: None,
+        perms: None,
+        created_at: now,
+        last_used_at: Some(now),
+        // Trust belongs to the identity, the same for every browser.
+        trust: data.browser_trust_of(identity_pubkey),
+        rules: Vec::new(),
+        browsers: true,
+    });
+}
+
+/// Where browsers reach a Desktop only identity: its own browser relays, else those of a
+/// browser's connection it has already, else the bunker's.
+pub fn browser_relays(data: &BunkerData, identity_pubkey: &str) -> Vec<String> {
+    if let Some(relays) = data.browser_relays.get(identity_pubkey)
+        && !relays.is_empty()
+    {
+        return relays.clone();
+    }
+    data.connections
+        .iter()
+        .find(|c| c.browsers && c.identity_pubkey == identity_pubkey)
+        .map(|c| app_relays(data, c).clone())
+        .unwrap_or_else(|| data.relays.clone())
 }
 
 /// Where answers to this app go: its own relays, or the bunker's.
@@ -279,6 +466,7 @@ fn details(method: &str, params: &[String]) -> Result<AskDetails, &'static str> 
             created_at: template.created_at,
             peer: None,
             site: None,
+            browser: None,
         });
     }
     let peer = params.first().ok_or("Missing public key.")?;
@@ -421,8 +609,20 @@ mod tests {
         }
     }
 
+    /// What the pointer in the backup carries for `IDENTITY`, as a browser sends it.
+    const BROWSER_SECRET: &str = "0123456789abcdef0123456789abcdef";
+
     fn run(data: &mut BunkerData, request: Incoming, now: i64) -> Outcome {
-        handle(data, IDENTITY, true, SIGNER, &request, now).0
+        handle(
+            data,
+            IDENTITY,
+            true,
+            Some(BROWSER_SECRET),
+            SIGNER,
+            &request,
+            now,
+        )
+        .0
     }
 
     fn reply(outcome: Outcome) -> Response {
@@ -439,6 +639,151 @@ mod tests {
         let mut data = with_invite();
         reply(run(&mut data, incoming("connect", &[SIGNER, "s3cret"]), 10));
         data
+    }
+
+    #[test]
+    fn a_browser_with_its_own_key_waits_for_allow_then_connects_and_a_blocked_one_is_refused() {
+        let meta = r#"{"name":"Work laptop","gooti":"browser"}"#;
+        let ask_connect = || incoming("connect", &[SIGNER, BROWSER_SECRET, "", meta]);
+
+        // Without the secret from the backup: refused, and nobody is asked.
+        let mut data = BunkerData::default();
+        let stranger = run(&mut data, incoming("connect", &[SIGNER, "", "", meta]), 5);
+        assert_eq!(reply(stranger).error.as_deref(), Some(BROWSER_NOT_KNOWN));
+        let wrong = incoming(
+            "connect",
+            &[SIGNER, "ffffffffffffffffffffffffffffffff", "", meta],
+        );
+        assert_eq!(
+            reply(run(&mut data, wrong, 6)).error.as_deref(),
+            Some(BROWSER_NOT_KNOWN)
+        );
+        // Nor for an identity that is not Desktop only.
+        let (shared, _) = handle(&mut data, IDENTITY, true, None, SIGNER, &ask_connect(), 7);
+        assert_eq!(reply(shared).error.as_deref(), Some(BROWSER_NOT_KNOWN));
+        assert!(data.browsers.is_empty() && data.connections.is_empty());
+
+        // Unknown: one question, no connection yet, no secret needed.
+        let mut data = BunkerData::default();
+        let Outcome::Ask(ask) = run(&mut data, ask_connect(), 10) else {
+            panic!("a new browser must be asked about");
+        };
+        assert_eq!(ask.method, BROWSER_CONNECT);
+        let browser = ask.details.browser.clone().unwrap();
+        assert_eq!(browser.name, "Work laptop");
+        assert_eq!(browser.code, browser_code(CLIENT));
+        assert!(data.connections.is_empty());
+
+        // Approved: it connects at once, as a browser's connection with its name, and with the
+        // trust the identity has for browsers.
+        data.browser_trust.insert(IDENTITY.into(), Trust::Ask);
+        data.browsers.push(BrowserDevice {
+            client_pubkey: CLIENT.into(),
+            name: "Work laptop".into(),
+            approved_at: Some(5),
+            blocked: false,
+            blocked_at: None,
+        });
+        assert_eq!(reply(run(&mut data, ask_connect(), 20)).result, "ack");
+        let connection = &data.connections[0];
+        assert!(connection.browsers);
+        assert_eq!(connection.name.as_deref(), Some("Work laptop"));
+        assert_eq!(connection.trust, Trust::Ask);
+        // Its requests may name the site, like the shared key's.
+        let signed = run(
+            &mut data,
+            incoming(
+                "sign_event",
+                &[
+                    r#"{"kind":1,"content":"hi","tags":[],"created_at":1}"#,
+                    r#"{"site":"primal.net"}"#,
+                ],
+            ),
+            30,
+        );
+        let Outcome::Ask(ask) = signed else {
+            panic!("Ask every time asks");
+        };
+        assert_eq!(ask.details.site.as_deref(), Some("primal.net"));
+
+        // Blocked: refused, and asking again does not help.
+        let mut data = BunkerData::default();
+        data.browsers.push(BrowserDevice {
+            client_pubkey: CLIENT.into(),
+            name: "Old laptop".into(),
+            approved_at: Some(5),
+            blocked: true,
+            blocked_at: Some(6),
+        });
+        let refused = reply(run(&mut data, ask_connect(), 40));
+        assert_eq!(refused.error.as_deref(), Some(BROWSER_DISCONNECTED));
+        assert!(data.connections.is_empty());
+        // So is any other request from it.
+        let ping = reply(run(&mut data, incoming("ping", &[]), 50));
+        assert_eq!(ping.error.as_deref(), Some(BROWSER_DISCONNECTED));
+    }
+
+    #[test]
+    fn a_retry_is_the_same_request_and_anything_else_is_not() {
+        let ask = |method: &str, kind: u16, content: &str, created_at: u64| Ask {
+            key: uuid::Uuid::new_v4().to_string(),
+            request_id: "r".into(),
+            connection_id: "c".into(),
+            identity_pubkey: IDENTITY.into(),
+            client_pubkey: CLIENT.into(),
+            signer_pubkey: SIGNER.into(),
+            method: method.into(),
+            params: vec![content.into()],
+            scheme: Scheme::Nip44,
+            received_at: 0,
+            details: AskDetails {
+                kind: Some(kind),
+                content: Some(content.into()),
+                created_at: Some(created_at),
+                site: Some("primal.net".into()),
+                ..AskDetails::default()
+            },
+        };
+        let first = ask("sign_event", 5, "Deleted by the author", 1);
+        // A new time is still the same request; another text, kind, app or site is not.
+        assert!(first.same_request(&ask("sign_event", 5, "Deleted by the author", 9)));
+        assert!(!first.same_request(&ask("sign_event", 5, "Something else", 1)));
+        assert!(!first.same_request(&ask("sign_event", 1, "Deleted by the author", 1)));
+        let mut other_app = ask("sign_event", 5, "Deleted by the author", 1);
+        other_app.connection_id = "d".into();
+        assert!(!first.same_request(&other_app));
+        let mut other_site = ask("sign_event", 5, "Deleted by the author", 1);
+        other_site.details.site = Some("iris.to".into());
+        assert!(!first.same_request(&other_site));
+        // Encrypt and decrypt: the same text for the same peer.
+        let encrypt = ask("nip44_encrypt", 0, "hi", 0);
+        assert!(encrypt.same_request(&ask("nip44_encrypt", 0, "hi", 0)));
+        assert!(!encrypt.same_request(&ask("nip44_encrypt", 0, "bye", 0)));
+        // A browser asking to connect is handled on its own.
+        let connect = ask(BROWSER_CONNECT, 0, "", 0);
+        assert!(!connect.same_request(&ask(BROWSER_CONNECT, 0, "", 0)));
+    }
+
+    #[test]
+    fn the_retired_shared_key_is_told_to_update_gooti() {
+        let mut data = BunkerData::default();
+        data.retired_shared_keys.push(CLIENT.into());
+        let ping = reply(run(&mut data, incoming("ping", &[]), 10));
+        assert_eq!(ping.error.as_deref(), Some(BROWSER_UPDATE));
+        assert!(data.connections.is_empty());
+    }
+
+    #[test]
+    fn the_browser_code_is_stable_and_short() {
+        let code = browser_code(CLIENT);
+        assert_eq!(code.len(), 7);
+        assert_eq!(&code[3..4], "-");
+        assert_eq!(code, browser_code(CLIENT));
+        assert_ne!(code, browser_code(SIGNER));
+        assert!(
+            code.chars()
+                .all(|c| c == '-' || "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(c))
+        );
     }
 
     #[test]
@@ -577,6 +922,7 @@ mod tests {
             &mut data,
             IDENTITY,
             true,
+            None,
             SIGNER,
             &incoming("ping", &[]),
             70_010,
@@ -708,6 +1054,7 @@ mod tests {
             &mut data,
             IDENTITY,
             false,
+            None,
             SIGNER,
             &incoming("ping", &[]),
             20,

@@ -73,6 +73,42 @@ describe('Identities', () => {
     expect(page.querySelector('.served-elsewhere')).toBeNull();
   });
 
+  it('groups site-only identities apart, and keeps one as a regular identity', async () => {
+    core.identities.set([
+      ALICE,
+      { ...ALICE, id: 'primal', nick: 'primal.net', site: 'primal.net' },
+      { ...ALICE, id: 'snort', nick: 'Test', site: 'snort.social' },
+    ]);
+    const list = TestBed.createComponent(IdentitiesPage);
+    await settle(list);
+    const root = list.nativeElement as HTMLElement;
+    // Two groups, both open, each can be closed.
+    expect(text(root)).toContain('Regular identities');
+    expect(text(root)).toContain('Site-only identities');
+    expect(root.querySelector('.info')?.getAttribute('aria-label')).toBe('What are site-only identities?');
+    expect(root.querySelectorAll('a.identity').length).toBe(3);
+    (root.querySelector('[data-action="toggle-regular-identities"]') as HTMLButtonElement).click();
+    await settle(list);
+    expect(root.querySelectorAll('a.identity').length).toBe(2);
+    (root.querySelector('[data-action="toggle-regular-identities"]') as HTMLButtonElement).click();
+    await settle(list);
+    // A renamed site-only identity still shows its site.
+    expect(text(root)).toContain('snort.social');
+    (root.querySelector('[data-action="toggle-site-identities"]') as HTMLButtonElement).click();
+    await settle(list);
+    expect(root.querySelectorAll('a.identity').length).toBe(1);
+
+    const detail = TestBed.createComponent(IdentityDetailPage);
+    detail.componentRef.setInput('id', 'primal');
+    await settle(detail);
+    const page = detail.nativeElement as HTMLElement;
+    expect(text(page)).toContain('Site-only identity for primal.net');
+    button(page, 'Keep as a regular identity').click();
+    await settle(detail);
+    expect(core.keepAsRegularIdentity).toHaveBeenCalledExactlyOnceWith('primal');
+    expect(page.querySelector('.site-card')).toBeNull();
+  });
+
   it('generates a key unless one is imported', async () => {
     const fixture = TestBed.createComponent(IdentityNewPage);
     await settle(fixture);
@@ -204,5 +240,58 @@ describe('Identities', () => {
     confirm.answer(true);
     await settle(fixture);
     expect(core.setCustody).toHaveBeenLastCalledWith('alice', 'shared');
+    // Back in the browsers: no browser settings any more.
+    expect(root.querySelector('[aria-label="Browsers"]')).toBeNull();
+  });
+
+  it('sets trust and relays for all browsers of a Desktop only identity', async () => {
+    core.identities.set([{ ...ALICE, custody: 'desktop' }]);
+    const fixture = TestBed.createComponent(IdentityDetailPage);
+    fixture.componentRef.setInput('id', 'alice');
+    await settle(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    const section = root.querySelector<HTMLElement>('[aria-label="Browsers"]')!;
+    expect(text(section)).toContain('How far your browsers may go as Alice without asking.');
+    expect(section.querySelector<HTMLInputElement>('input[value="basic"]')!.checked).toBe(true);
+    expect(section.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('wss://relay.getgooti.com');
+
+    const ask = section.querySelector<HTMLInputElement>('input[value="ask"]')!;
+    ask.checked = true;
+    ask.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(core.setIdentityBrowserTrust).toHaveBeenCalledWith('alice', 'ask');
+    expect(text(root)).toContain('Some sites, such as Primal, give up after about 8 seconds.');
+
+    setTextarea(root, 'textarea[name="identityBrowserRelays"]', 'wss://mine.example');
+    await settle(fixture);
+    button(root, 'Save relays').click();
+    await settle(fixture);
+    expect(core.setIdentityBrowserRelays).toHaveBeenCalledWith('alice', ['wss://mine.example']);
+    expect(text(root)).toContain('Updated the relays');
+  });
+
+  it('lists choices remembered for its browsers, and forgets one', async () => {
+    core.identities.set([{ ...ALICE, custody: 'desktop' }]);
+    core.identityBrowserSettings = {
+      ...core.identityBrowserSettings,
+      rules: [
+        { connectionId: 'conn-laptop', browser: 'Work laptop', method: 'sign_event', kind: 1, policy: 'allow', createdAt: 1 },
+      ],
+    };
+    core.bunkerForget.mockImplementation(async () => {
+      core.identityBrowserSettings = { ...core.identityBrowserSettings, rules: [] };
+      return core.connectionDetail;
+    });
+    const fixture = TestBed.createComponent(IdentityDetailPage);
+    fixture.componentRef.setInput('id', 'alice');
+    await settle(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    const section = root.querySelector<HTMLElement>('[aria-label="Browsers"]')!;
+    expect(text(section)).toContain('Work laptop · Approve · Always');
+
+    button(section, 'Forget').click();
+    await settle(fixture);
+    expect(core.bunkerForget).toHaveBeenCalledWith('conn-laptop', 'sign_event', 1);
+    expect(text(section)).toContain('Choices you remember in the request window appear here.');
   });
 });

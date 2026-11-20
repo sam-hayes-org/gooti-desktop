@@ -109,3 +109,52 @@
     background: var(--background);
   }
 }
+
+.site-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+
+  .copy {
+    margin: 0;
+  }
+
+  strong {
+    color: #ffffff;
+    font-weight: 600;
+  }
+}
+
+.slow-sites {
+  color: #f0c36d;
+}
+
+.relay-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notice {
+  color: #b6e3c4;
+  font-size: 14px;
+}
+
+.rule-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rule-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rule-name {
+  font-weight: 500;
+}

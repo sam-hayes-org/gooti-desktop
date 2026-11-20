@@ -24,7 +24,7 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
         <p class="kicker">Version</p>
         <p class="copy" data-info="version">
           @if (core.appInfo(); as info) {
-            {{ info.version }} ({{ info.channel }})
+            {{ info.version }}
           } @else {
             Unknown
           }

@@ -28,6 +28,22 @@ pub struct BackupState {
     /// This desktop only. Not part of the published blob.
     #[serde(default)]
     pub auto_backup: bool,
+    /// This desktop's device record (`device.rs`). Made on its first backup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<LocalDevice>,
+}
+
+/// This desktop in "Devices". Only `id` and `name` travel, in the device record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDevice {
+    pub id: String,
+    /// Set by "Rename". `None`: "Gooti Desktop on <system>".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// When the device record was last published, in ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<Millis>,
 }
 
 impl Drop for BackupState {
@@ -49,6 +65,8 @@ pub struct LiveIdentity {
     /// When this desktop last moved the key (see `SharedIdentity::custody_at`). `None` keeps the
     /// time the stored row has.
     pub custody_at: Option<Millis>,
+    /// The host a site-only identity was made for (see `SharedIdentity::site`).
+    pub site: Option<String>,
 }
 
 /// Builds the document to publish from the live identities plus stored stamps.
@@ -183,6 +201,7 @@ fn live_from(winner: &SharedIdentity, previous_bunker: Option<&SharedBunker>) ->
         color: Some(color_for_pubkey(&winner.pubkey, winner.color.as_deref())),
         bunker,
         custody_at: winner.custody_at,
+        site: winner.site.clone(),
     }
 }
 
@@ -214,6 +233,7 @@ fn identity_record(
         custody_at: identity
             .custody_at
             .or_else(|| previous.and_then(|p| p.custody_at)),
+        site: identity.site.clone(),
         extra: Default::default(),
     }
 }
@@ -314,6 +334,7 @@ mod tests {
                 extra: Default::default(),
             }),
             custody_at: None,
+            site: None,
         }
     }
 

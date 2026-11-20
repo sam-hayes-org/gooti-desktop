@@ -35,8 +35,12 @@
               }
             </div>
             <div class="row-buttons">
-              <button type="button" class="action quiet" (click)="decide(ask.key, false)">Reject</button>
-              <button type="button" class="action primary" (click)="decide(ask.key, true)">Approve</button>
+              <button type="button" class="action quiet" (click)="decide(ask.key, false)">
+                {{ ask.method === 'connect' ? 'Deny' : 'Reject' }}
+              </button>
+              <button type="button" class="action primary" (click)="decide(ask.key, true)">
+                {{ ask.method === 'connect' ? 'Allow' : 'Approve' }}
+              </button>
             </div>
           </div>
         }
@@ -45,7 +49,7 @@
 
     <section class="group">
       <p class="kicker">Apps</p>
-      @for (connection of info.connections; track connection.id) {
+      @for (connection of apps(); track connection.id) {
         <div class="sam-card app-row">
           <a class="app-text app-link" [routerLink]="['/connections', connection.id]">
             <span class="app-name">{{ appName(connection) }} <i class="bi bi-chevron-right"></i></span>
@@ -85,6 +89,34 @@
           <span class="copy">Apps get an error until you turn this off. Nothing is signed meanwhile.</span>
         </span>
       </label>
+    </section>
+
+    <section class="group" aria-label="Browsers">
+      <p class="kicker">Browsers</p>
+      <p class="copy">
+        Browsers with Gooti sign through this desktop for your Desktop only identities. Each one asks once, and
+        you allow it here. If a device is lost, disconnect its browser: its key stops working at once.
+      </p>
+      @if (browsers(); as list) {
+        @for (browser of list.browsers; track browser.clientPubkey) {
+          <div class="sam-card app-row" data-browser>
+            <div class="app-text">
+              <span class="app-name"><i class="bi bi-window"></i> {{ browser.name }}</span>
+              <span class="copy">Code <span class="mono code">{{ browser.code }}</span> · Allowed {{ when(browser.approvedAt) }}</span>
+              <span class="copy">Last used: {{ when(browser.lastUsedAt) }}</span>
+            </div>
+            <button type="button" class="action quiet" [disabled]="busy()" (click)="disconnectBrowser(browser.name, browser.clientPubkey)">
+              Disconnect
+            </button>
+          </div>
+        }
+        @if (!list.browsers.length) {
+          <div class="sam-card empty-card">
+            <p class="title">No browser yet</p>
+            <p class="copy">A browser with Gooti asks here when it needs one of your Desktop only identities.</p>
+          </div>
+        }
+      }
     </section>
 
     <section class="group">

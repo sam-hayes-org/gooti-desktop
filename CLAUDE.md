@@ -87,8 +87,8 @@ On request, or after touching that area:
 
 ```
 cargo test -p gooti-desktop -- --ignored                       # the real OS keychain (needs a Secret Service)
-cargo test -p gooti-core --test relay_websocket -- --ignored   # wss:// to relay.getgooti.com (read only)
-cargo test -p gooti-core --test bunker_flow -- --ignored       # bunker over relay.getgooti.com (publishes kind 24133)
+cargo test -p gooti-core --test relay_websocket -- --ignored   # wss:// to test.getgooti.com (read only)
+cargo test -p gooti-core --test bunker_flow -- --ignored       # bunker over test.getgooti.com (publishes kind 24133)
 npm run build:local                                            # a release build; check it looks right
 ```
 
@@ -96,6 +96,20 @@ When the extension's backup code changes, regenerate its test values with `npm r
 `crates/gooti-core/tests/vectors/extension.json`.
 
 The dev app uses the real data folder `~/.local/share/com.getgooti.desktop` (vault.json, settings.json).
+
+## Relays while building
+
+Build and try new features against the **test relay**, `wss://test.getgooti.com` (server `hetzner-2`,
+same software and write policy as relay.getgooti.com; see `../gooti-relay`). Set it as the backup relay
+(Backup → Relays) and the default relay for apps (Settings) in the dev app, and in the dev extension.
+`wss://relay.getgooti.com` holds the backups of real users: publish nothing there while building.
+
+A feature that needs the relay to accept something new (a new event, tag or limit): change the write
+policy in `../gooti-relay`, deploy it with `./deploy.sh --test`, build against that, and deploy it to
+relay.getgooti.com (`./deploy.sh`) only with the release that needs it.
+
+The `--ignored` tests `relay_websocket` and `bunker_flow` use the test relay too (`tests/common`,
+`test_relay()`; `GOOTI_TEST_RELAY` picks another).
 
 ## Things that cost time before
 
