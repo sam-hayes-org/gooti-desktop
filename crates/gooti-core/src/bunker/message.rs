@@ -34,12 +34,45 @@ fn string_params<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
+/// Why a request failed, for programs: the `code` next to `error` in a reply. NIP-46 has only the
+/// error text, which is written for people and may change; the code does not. Apps that do not
+/// know it ignore it. Never rename a value: servers such as a Gooti MCP server act on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// The client key has no connection to this identity: never connected, disconnected on the
+    /// desktop, or logged out. Connect again with a new link.
+    NotConnected,
+    /// The connection link was used before or has expired.
+    LinkInvalid,
+    /// Gooti is paused on this desktop.
+    Paused,
+    /// Someone pressed Reject, or a remembered choice rejects it.
+    Rejected,
+    /// Nobody answered the question on the desktop in time.
+    TimedOut,
+    /// The method is not one this bunker knows.
+    UnsupportedMethod,
+    /// A parameter is missing or invalid.
+    InvalidParams,
+    /// Approved, but signing, encrypting or decrypting failed.
+    Failed,
+    /// A browser key that was denied or disconnected. The extension makes a new key.
+    BrowserDisconnected,
+    /// A browser `connect` without the secret from the backup.
+    BrowserNotKnown,
+    /// A browser still on Gooti 2.0's retired shared key.
+    BrowserUpdate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Response {
     pub id: String,
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<ErrorCode>,
 }
 
 impl Response {
@@ -48,14 +81,16 @@ impl Response {
             id: id.into(),
             result: result.into(),
             error: None,
+            code: None,
         }
     }
 
-    pub fn error(id: &str, error: impl Into<String>) -> Response {
+    pub fn error(id: &str, code: ErrorCode, error: impl Into<String>) -> Response {
         Response {
             id: id.into(),
             result: String::new(),
             error: Some(error.into()),
+            code: Some(code),
         }
     }
 }
@@ -213,11 +248,38 @@ mod tests {
     }
 
     #[test]
-    fn errors_carry_an_empty_result() {
-        let json = serde_json::to_value(Response::error("7", "Rejected")).unwrap();
+    fn errors_carry_an_empty_result_and_a_code() {
+        let json = serde_json::to_value(Response::error(
+            "7",
+            ErrorCode::NotConnected,
+            "Not connected.",
+        ))
+        .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "id": "7", "result": "", "error": "Rejected" })
+            serde_json::json!({ "id": "7", "result": "", "error": "Not connected.", "code": "not_connected" })
         );
+        let ok = serde_json::to_value(Response::ok("8", "pong")).unwrap();
+        assert_eq!(ok, serde_json::json!({ "id": "8", "result": "pong" }));
+    }
+
+    #[test]
+    fn error_codes_keep_their_names() {
+        let names = [
+            (ErrorCode::NotConnected, "not_connected"),
+            (ErrorCode::LinkInvalid, "link_invalid"),
+            (ErrorCode::Paused, "paused"),
+            (ErrorCode::Rejected, "rejected"),
+            (ErrorCode::TimedOut, "timed_out"),
+            (ErrorCode::UnsupportedMethod, "unsupported_method"),
+            (ErrorCode::InvalidParams, "invalid_params"),
+            (ErrorCode::Failed, "failed"),
+            (ErrorCode::BrowserDisconnected, "browser_disconnected"),
+            (ErrorCode::BrowserNotKnown, "browser_not_known"),
+            (ErrorCode::BrowserUpdate, "browser_update"),
+        ];
+        for (code, name) in names {
+            assert_eq!(serde_json::to_value(code).unwrap(), name);
+        }
     }
 }

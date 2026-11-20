@@ -10,7 +10,7 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 
 use super::handler::{Ask, BROWSER_CONNECT, BROWSER_DISCONNECTED, Outcome};
-use super::message::{Response, Scheme, response_event};
+use super::message::{ErrorCode, Response, Scheme, response_event};
 use super::policy::{Policy, Reason, Remember, rule_for};
 use super::pool::{RelayPool, RelayStatus};
 use crate::activity::{Activity, ActivityEntry};
@@ -21,6 +21,9 @@ use crate::time;
 /// An unanswered request is refused after this, so the app is not left hanging.
 pub const ASK_TIMEOUT_MS: i64 = 5 * 60 * 1000;
 const SEEN_LIMIT: usize = 1000;
+
+/// The answer to a question nobody answered on the desktop in time.
+const TIMED_OUT: &str = "Nobody answered on the desktop in time.";
 
 /// A waiting request as the approval window lists it: `times` is how often the app sent it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -222,7 +225,11 @@ impl BunkerService {
             self.gooti()
                 .vault_mut()
                 .bunker_block_browser(&ask.client_pubkey, &name)?;
-            Response::error(&ask.request_id, BROWSER_DISCONNECTED)
+            Response::error(
+                &ask.request_id,
+                ErrorCode::BrowserDisconnected,
+                BROWSER_DISCONNECTED,
+            )
         };
         self.answer(ask, &response)?;
         self.refresh();
@@ -236,7 +243,10 @@ impl BunkerService {
         let result = self.gooti().vault().bunker_perform(ask)?;
         let (response, error) = match result {
             Ok(result) => (Response::ok(&ask.request_id, result), None),
-            Err(error) => (Response::error(&ask.request_id, error.clone()), Some(error)),
+            Err(error) => (
+                Response::error(&ask.request_id, ErrorCode::Failed, error.clone()),
+                Some(error),
+            ),
         };
         self.answer(ask, &response)?;
         self.log_request(ask, true, reason, error);
@@ -244,12 +254,12 @@ impl BunkerService {
     }
 
     fn refuse(&self, ask: &Ask, reason: Reason) -> Result<()> {
-        let text = if reason == Reason::TimedOut {
-            "Nobody answered on the desktop in time."
+        let (code, text) = if reason == Reason::TimedOut {
+            (ErrorCode::TimedOut, TIMED_OUT)
         } else {
-            "Rejected."
+            (ErrorCode::Rejected, "Rejected.")
         };
-        self.answer(ask, &Response::error(&ask.request_id, text))?;
+        self.answer(ask, &Response::error(&ask.request_id, code, text))?;
         self.log_request(ask, false, reason, None);
         Ok(())
     }
@@ -353,7 +363,7 @@ impl BunkerService {
         for ask in &expired {
             let _ = self.answer(
                 ask,
-                &Response::error(&ask.request_id, "Nobody answered on the desktop in time."),
+                &Response::error(&ask.request_id, ErrorCode::TimedOut, TIMED_OUT),
             );
         }
         (self.notify)(Notice::Pending);

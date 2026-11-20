@@ -30,6 +30,14 @@ never reach the UI, except when you ask to show an nsec.
 
 - **Methods:** `connect`, `get_public_key`, `sign_event`, `nip04_encrypt`, `nip04_decrypt`,
   `nip44_encrypt`, `nip44_decrypt`, `ping`, `switch_relays`, `logout`.
+- **Error codes:** an error reply has a `code` next to `error`, for programs: the text is written for
+  people and may change, the code does not. `not_connected` (this client key has no connection: never
+  connected, disconnected here, or logged out; connect again), `link_invalid`, `paused`, `rejected`,
+  `timed_out` (nobody answered within 5 minutes), `unsupported_method`, `invalid_params`, `failed`,
+  and for Gooti browsers `browser_disconnected`, `browser_not_known`, `browser_update`. A client key
+  gets a reply only while this desktop still listens on that identity's signer key and relay: after the
+  last app of an identity that is not Desktop only is disconnected, or while Gooti is locked, there is
+  no answer at all.
 - **Connecting:** Connections → **Connect new app**. Either show a `bunker://` link with a QR code
   (single use, valid for one hour), or paste a `nostrconnect://` link. A `nostrconnect://` link clicked
   in a browser or another app opens this page with the link filled in; you still choose the identity
