@@ -6,15 +6,16 @@ use serde::Serialize;
 use super::handler::{self, Ask, Outcome};
 use super::message::Incoming;
 use super::policy::{Rule, Trust, remember};
-use super::state::BROWSERS_NAME;
-use super::state::{Connection, INVITE_LIFETIME_MS, Invite, SignerKey};
+use super::state::{
+    BrowserDevice, Connection, INVITE_LIFETIME_MS, Invite, SignerKey, browser_code, browser_secret,
+};
 use super::uri::{bunker_uri, parse_nostrconnect};
 use crate::activity::{Activity, ActivityEntry};
 use crate::backup::document::{SharedBunker, is_wss_url};
 use crate::backup::phrase::hex;
 use crate::crypto::random_bytes;
 use crate::error::{Error, Result};
-use crate::identity::{BrowserLink, StoredIdentity};
+use crate::identity::{BrowserLink, Custody, StoredIdentity};
 use crate::time;
 use crate::vault::{Vault, normalize_relays};
 
@@ -27,6 +28,44 @@ pub struct BunkerInfo {
     pub connections: Vec<ConnectionInfo>,
     /// The relays of bunker links still waiting for an app.
     pub link_relays: Vec<String>,
+}
+
+/// "Browsers" in Connections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserList {
+    pub browsers: Vec<BrowserInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserInfo {
+    pub client_pubkey: String,
+    pub name: String,
+    pub code: String,
+    pub approved_at: Option<i64>,
+    pub last_used_at: Option<i64>,
+}
+
+/// "Browsers" on a Desktop only identity's page: how far its browsers may go without asking, and
+/// the relays they reach it on. The same for every browser.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityBrowsers {
+    pub trust: Trust,
+    pub relays: Vec<String>,
+    /// Choices remembered in the approval window, per browser, that still apply.
+    pub rules: Vec<BrowserRule>,
+}
+
+/// A choice remembered for one browser and this identity. Forget it with the connection's id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRule {
+    pub connection_id: String,
+    pub browser: String,
+    #[serde(flatten)]
+    pub rule: Rule,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -292,6 +331,137 @@ impl Vault {
         self.save()
     }
 
+    /// "Browsers" in Connections: each browser with its own key, and the shared key of Gooti 2.0
+    /// browsers while it still works. Blocked browsers are left out.
+    pub fn bunker_browsers(&self) -> Result<BrowserList> {
+        let bunker = &self.unlocked()?.data.bunker;
+        let last_used = |client: &str| {
+            bunker
+                .connections
+                .iter()
+                .filter(|c| c.client_pubkey == client)
+                .filter_map(|c| c.last_used_at)
+                .max()
+        };
+        let browsers = bunker
+            .browsers
+            .iter()
+            .filter(|b| !b.blocked && b.approved_at.is_some())
+            .map(|b| BrowserInfo {
+                client_pubkey: b.client_pubkey.clone(),
+                name: b.name.clone(),
+                code: browser_code(&b.client_pubkey),
+                approved_at: b.approved_at,
+                last_used_at: last_used(&b.client_pubkey),
+            })
+            .collect();
+        Ok(BrowserList { browsers })
+    }
+
+    /// Allow on a browser's request: it signs for this identity now, and for every other
+    /// Desktop only identity as soon as it asks.
+    pub fn bunker_allow_browser(&mut self, ask: &Ask) -> Result<()> {
+        let name = ask
+            .details
+            .browser
+            .as_ref()
+            .map(|b| b.name.clone())
+            .unwrap_or_else(|| "A browser".into());
+        let now = time::now_ms();
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        bunker
+            .browsers
+            .retain(|b| b.client_pubkey != ask.client_pubkey);
+        let browser = BrowserDevice {
+            client_pubkey: ask.client_pubkey.clone(),
+            name,
+            approved_at: Some(now),
+            blocked: false,
+            blocked_at: None,
+        };
+        handler::add_browser_connection(bunker, &ask.identity_pubkey, &browser, now);
+        bunker.browsers.push(browser.clone());
+        self.record_activity(ActivityEntry {
+            at: now,
+            what: Activity::Connected {
+                app: browser.name,
+                connection_id: self
+                    .unlocked()?
+                    .data
+                    .bunker
+                    .connections
+                    .iter()
+                    .find(|c| {
+                        c.client_pubkey == ask.client_pubkey
+                            && c.identity_pubkey == ask.identity_pubkey
+                    })
+                    .map(|c| c.id.clone())
+                    .unwrap_or_default(),
+                identity_pubkey: ask.identity_pubkey.clone(),
+            },
+        });
+        self.save_change()
+    }
+
+    /// Deny on a browser's request: it cannot ask again with that key for 90 days.
+    pub fn bunker_block_browser(&mut self, client_pubkey: &str, name: &str) -> Result<()> {
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        match bunker
+            .browsers
+            .iter_mut()
+            .find(|b| b.client_pubkey == client_pubkey)
+        {
+            Some(browser) => {
+                browser.blocked = true;
+                browser.blocked_at = Some(time::now_ms());
+            }
+            None => bunker.browsers.push(BrowserDevice {
+                client_pubkey: client_pubkey.to_string(),
+                name: name.to_string(),
+                approved_at: None,
+                blocked: true,
+                blocked_at: Some(time::now_ms()),
+            }),
+        }
+        self.save_change()
+    }
+
+    /// "Disconnect": the browser's key stops working for every identity, at once. It stays blocked
+    /// for 90 days (`BLOCKED_KEPT_MS`); by then a lost browser is long gone from your hands.
+    pub fn bunker_disconnect_browser(&mut self, client_pubkey: &str) -> Result<()> {
+        let now = time::now_ms();
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        let browser = bunker
+            .browsers
+            .iter_mut()
+            .find(|b| b.client_pubkey == client_pubkey && !b.blocked)
+            .ok_or(Error::ConnectionNotFound)?;
+        browser.blocked = true;
+        browser.blocked_at = Some(now);
+        let name = browser.name.clone();
+        let ended: Vec<Connection> = bunker
+            .connections
+            .iter()
+            .filter(|c| c.client_pubkey == client_pubkey)
+            .cloned()
+            .collect();
+        bunker
+            .connections
+            .retain(|c| c.client_pubkey != client_pubkey);
+        bunker.removed.extend(ended.iter().map(|c| c.id.clone()));
+        for connection in ended {
+            self.record_activity(ActivityEntry {
+                at: now,
+                what: Activity::Disconnected {
+                    app: name.clone(),
+                    connection_id: connection.id,
+                    identity_pubkey: connection.identity_pubkey,
+                },
+            });
+        }
+        self.save_change()
+    }
+
     /// The name Activity and the prompts show for an app.
     pub fn bunker_app_name(&self, connection_id: &str) -> String {
         self.connection(connection_id)
@@ -350,8 +520,99 @@ impl Vault {
         Ok(relays)
     }
 
-    /// Changes the relays Gooti browsers use to reach a Desktop only identity. Backup takes the
-    /// change to the browsers. Other apps chose their relays when they connected.
+    /// "Browsers" on a Desktop only identity's page.
+    pub fn bunker_identity_browsers(&self, identity_id: &str) -> Result<IdentityBrowsers> {
+        let identity = self.find(identity_id)?;
+        if identity.custody != Custody::Desktop {
+            return Err(Error::NotDesktopOnly);
+        }
+        let bunker = &self.unlocked()?.data.bunker;
+        let now = time::now_ms();
+        let mut rules: Vec<BrowserRule> = bunker
+            .connections
+            .iter()
+            .filter(|c| c.browsers && c.identity_pubkey == identity.pubkey)
+            .flat_map(|c| {
+                c.rules
+                    .iter()
+                    .filter(move |r| r.expires_at.is_none_or(|e| now < e))
+                    .map(move |r| BrowserRule {
+                        connection_id: c.id.clone(),
+                        browser: app_name(c),
+                        rule: r.clone(),
+                    })
+            })
+            .collect();
+        rules.sort_by(|a, b| {
+            (&a.browser, &a.rule.method, a.rule.kind).cmp(&(
+                &b.browser,
+                &b.rule.method,
+                b.rule.kind,
+            ))
+        });
+        Ok(IdentityBrowsers {
+            trust: bunker.browser_trust_of(&identity.pubkey),
+            relays: handler::browser_relays(bunker, &identity.pubkey),
+            rules,
+        })
+    }
+
+    /// How far every browser may go for this Desktop only identity without asking.
+    pub fn bunker_set_identity_browser_trust(
+        &mut self,
+        identity_id: &str,
+        trust: Trust,
+    ) -> Result<IdentityBrowsers> {
+        self.bunker_identity_browsers(identity_id)?;
+        let pubkey = self.find(identity_id)?.pubkey.clone();
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        bunker.browser_trust.insert(pubkey.clone(), trust);
+        for connection in bunker
+            .connections
+            .iter_mut()
+            .filter(|c| c.browsers && c.identity_pubkey == pubkey)
+        {
+            connection.trust = trust;
+        }
+        self.save_change()?;
+        self.bunker_identity_browsers(identity_id)
+    }
+
+    /// The relays every browser reaches this Desktop only identity on. Backup takes the change to
+    /// the browsers.
+    pub fn bunker_set_identity_browser_relays(
+        &mut self,
+        identity_id: &str,
+        relays: &[String],
+    ) -> Result<IdentityBrowsers> {
+        self.bunker_identity_browsers(identity_id)?;
+        let relays = self.browser_relays_or_default(Some(relays))?;
+        let pubkey = self.find(identity_id)?.pubkey.clone();
+        self.set_browser_relays(&pubkey, relays)?;
+        self.bunker_identity_browsers(identity_id)
+    }
+
+    fn set_browser_relays(&mut self, identity_pubkey: &str, relays: Vec<String>) -> Result<()> {
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        bunker
+            .browser_relays
+            .insert(identity_pubkey.to_string(), relays.clone());
+        for connection in bunker
+            .connections
+            .iter_mut()
+            .filter(|c| c.browsers && c.identity_pubkey == identity_pubkey)
+        {
+            connection.relays = relays.clone();
+        }
+        self.save()?;
+        // The pointers browsers use name these relays.
+        self.restamp_desktop_identities()?;
+        Ok(())
+    }
+
+    /// Changes the relays browsers use to reach a Desktop only identity, from one of its
+    /// browsers' connections. Backup takes the change to the browsers. Other apps chose their
+    /// relays when they connected.
     pub fn bunker_set_app_relays(
         &mut self,
         connection_id: &str,
@@ -361,22 +622,12 @@ impl Vault {
             return Err(Error::AppRelaysFixed);
         }
         let relays = self.browser_relays_or_default(Some(relays))?;
-        let bunker = &mut self.unlocked_mut()?.data.bunker;
-        if let Some(connection) = bunker
-            .connections
-            .iter_mut()
-            .find(|c| c.id == connection_id)
-        {
-            connection.relays = relays.clone();
-        }
-        self.save()?;
-        // The pointers browsers use name these relays.
-        self.restamp_desktop_identities()?;
+        let identity = self.connection(connection_id)?.identity_pubkey.clone();
+        self.set_browser_relays(&identity, relays.clone())?;
         Ok(relays)
     }
 
-    /// Makes the signer key, the browsers' session key, and their connection (trust Basic) on
-    /// these relays.
+    /// Makes the signer key, and connects the approved browsers on these relays.
     pub(crate) fn ensure_browser_link(
         &mut self,
         identity_id: &str,
@@ -391,38 +642,33 @@ impl Vault {
                 ask_site: None,
                 signer_pubkey: Some(signer.public_key().to_hex()),
             });
+            // Moved to the desktop (again): browsers start at Basic. Set, not left out, so an
+            // earlier choice in the desktop record does not come back.
+            self.unlocked_mut()?
+                .data
+                .bunker
+                .browser_trust
+                .insert(pubkey.clone(), Trust::Basic);
         }
-        let client_pubkey = self
-            .find(identity_id)?
-            .browsers
-            .as_ref()
-            .and_then(|b| keys_from_hex(&b.client_secret_hex).ok())
-            .map(|k| k.public_key().to_hex())
-            .ok_or(Error::UnreadableVault)?;
+        // Browsers with their own key connect themselves. Approved ones need nothing more.
         let bunker = &mut self.unlocked_mut()?.data.bunker;
-        if let Some(existing) = bunker
+        bunker.browser_relays.insert(pubkey.clone(), relays.clone());
+        let approved: Vec<BrowserDevice> = bunker
+            .browsers
+            .iter()
+            .filter(|b| !b.blocked && b.approved_at.is_some())
+            .cloned()
+            .collect();
+        let now = time::now_ms();
+        for browser in &approved {
+            handler::add_browser_connection(bunker, &pubkey, browser, now);
+        }
+        for connection in bunker
             .connections
             .iter_mut()
-            .find(|c| c.identity_pubkey == pubkey && c.client_pubkey == client_pubkey)
+            .filter(|c| c.identity_pubkey == pubkey && c.browsers)
         {
-            existing.relays = relays;
-        } else {
-            bunker.connections.push(Connection {
-                id: uuid::Uuid::new_v4().to_string(),
-                identity_pubkey: pubkey,
-                client_pubkey,
-                relays,
-                name: Some(BROWSERS_NAME.into()),
-                url: None,
-                image: None,
-                perms: None,
-                created_at: time::now_ms(),
-                last_used_at: None,
-                // The extension already asks per site; routine requests need no second prompt.
-                trust: Trust::Basic,
-                rules: Vec::new(),
-                browsers: true,
-            });
+            connection.relays = relays.clone();
         }
         Ok(())
     }
@@ -440,6 +686,7 @@ impl Vault {
             .collect();
         bunker.connections.retain(|c| !ended.contains(&c.id));
         bunker.removed.extend(ended);
+        bunker.browser_relays.remove(&pubkey);
         Ok(())
     }
 
@@ -452,11 +699,21 @@ impl Vault {
         let bunker = &unlocked.data.bunker;
         let desktop_id = unlocked.data.desktop_id.as_str();
         let now = time::now_ms();
+        // A Desktop only identity waits for browsers that connect with their own key, so it is
+        // in use even before any browser has.
+        let desktop_only: Vec<&str> = unlocked
+            .data
+            .identities
+            .iter()
+            .filter(|i| i.browsers.is_some() && i.privkey.is_some())
+            .map(|i| i.pubkey.as_str())
+            .collect();
         let in_use = |identity: &str| {
-            bunker
-                .connections
-                .iter()
-                .any(|c| c.identity_pubkey == identity)
+            desktop_only.contains(&identity)
+                || bunker
+                    .connections
+                    .iter()
+                    .any(|c| c.identity_pubkey == identity)
                 || bunker.invites.iter().any(|i| {
                     i.identity_pubkey == identity && now - i.created_at < INVITE_LIFETIME_MS
                 })
@@ -485,7 +742,12 @@ impl Vault {
             .connections
             .iter()
             .flat_map(|c| handler::app_relays(bunker, c).iter());
-        for relay in used.chain(waiting) {
+        // Where a Desktop only identity's pointer sends browsers that are not connected yet.
+        let pointers: Vec<String> = desktop_only
+            .iter()
+            .flat_map(|pubkey| handler::browser_relays(bunker, pubkey))
+            .collect();
+        for relay in used.chain(waiting).chain(pointers.iter()) {
             if !relays.contains(relay) {
                 relays.push(relay.clone());
             }
@@ -514,10 +776,13 @@ impl Vault {
         let Some(incoming) = super::message::open_request(event, &signer) else {
             return Ok(None);
         };
-        let has_key = data
-            .identities
-            .iter()
-            .any(|i| i.pubkey == identity_pubkey && i.privkey.is_some());
+        let identity = data.identities.iter().find(|i| i.pubkey == identity_pubkey);
+        let has_key = identity.is_some_and(|i| i.privkey.is_some());
+        // Browsers connect only to a Desktop only identity, with the secret its pointer carries.
+        let browser_secret = identity
+            .filter(|i| i.custody == Custody::Desktop)
+            .and_then(|i| i.privkey.as_deref())
+            .map(browser_secret);
         let before = data.bunker.connections.len();
         let before_app = data
             .bunker
@@ -534,6 +799,7 @@ impl Vault {
             &mut data.bunker,
             &identity_pubkey,
             has_key,
+            browser_secret.as_deref(),
             &signer.public_key().to_hex(),
             &incoming,
             now,
@@ -656,7 +922,8 @@ impl Vault {
             .iter()
             .find(|c| c.client_pubkey == client_pubkey && c.identity_pubkey == identity_pubkey)
             .map(|c| handler::reply_relays(bunker, c))
-            .unwrap_or_else(|| bunker.relays.clone()))
+            // A browser that is not connected yet listens where the identity's pointer says.
+            .unwrap_or_else(|| handler::browser_relays(bunker, identity_pubkey)))
     }
 
     /// The public key of an identity this desktop can sign for.
@@ -707,16 +974,9 @@ pub fn browser_pointer(
         Some(named) => of_identity.find(|keys| keys.public_key().to_hex() == *named),
         None => of_identity.next(),
     }?;
-    // The relays of the browsers' connection for this identity.
-    let relays: Vec<String> = bunker
-        .connections
-        .iter()
-        .find(|c| c.browsers && c.identity_pubkey == identity.pubkey)
-        .map(|c| handler::app_relays(bunker, c).as_slice())
-        .unwrap_or(&bunker.relays)
-        .iter()
+    let relays: Vec<String> = handler::browser_relays(bunker, &identity.pubkey)
+        .into_iter()
         .filter(|r| is_wss_url(r))
-        .cloned()
         .collect();
     if relays.is_empty() {
         return None;
@@ -724,9 +984,11 @@ pub fn browser_pointer(
     Some(SharedBunker {
         pubkey: signer.public_key().to_hex(),
         relays,
-        secret: None,
+        // What a browser's `connect` must carry. The backup seals it with the pointer.
+        secret: identity.privkey.as_deref().map(browser_secret),
         ask_site: browsers.ask_site,
-        client_secret_key: Some(browsers.client_secret_hex.clone()),
+        // Browsers sign with their own key, which never goes into backup.
+        client_secret_key: None,
         extra: Default::default(),
     })
 }
@@ -751,7 +1013,7 @@ fn reply_relays_for(
         .iter()
         .find(|c| c.client_pubkey == incoming.client_pubkey && c.identity_pubkey == identity_pubkey)
         .map(|c| handler::reply_relays(bunker, c))
-        .unwrap_or_else(|| bunker.relays.clone())
+        .unwrap_or_else(|| handler::browser_relays(bunker, identity_pubkey))
 }
 
 /// A waiting link's relays. Links made before 2026-11-12 named the default relays.
@@ -1037,19 +1299,37 @@ mod tests {
         let bob = vault
             .add_identity_as("Bob", NewKey::Generate, crate::identity::Custody::Desktop)
             .unwrap();
-        for connection in &mut vault.unlocked_mut().unwrap().data.bunker.connections {
-            connection.relays.clear();
+        // The shared key of Gooti 2.0 browsers, as stored before 2026-11-17, without relays.
+        let shared = Keys::generate().public_key().to_hex();
+        {
+            let bunker = &mut vault.unlocked_mut().unwrap().data.bunker;
+            bunker.browser_relays.clear();
+            bunker.connections.push(Connection {
+                id: "shared".into(),
+                identity_pubkey: bob.pubkey.clone(),
+                client_pubkey: shared.clone(),
+                relays: Vec::new(),
+                name: Some("Gooti browsers".into()),
+                url: None,
+                image: None,
+                perms: None,
+                created_at: 0,
+                last_used_at: None,
+                trust: Trust::Basic,
+                rules: Vec::new(),
+                browsers: true,
+            });
         }
         vault.save().unwrap();
 
         vault.lock();
         vault.unlock("1234").unwrap();
-        let connections = &vault.unlocked().unwrap().data.bunker.connections;
-        assert_eq!(connections[0].relays, today);
-        // Gooti browsers too: their pointer no longer follows the default relays.
-        let browsers = connections.iter().find(|c| c.browsers).unwrap();
-        assert_eq!(browsers.relays, today);
-        assert!(bob.pubkey == browsers.identity_pubkey);
+        let bunker = &vault.unlocked().unwrap().data.bunker;
+        assert_eq!(bunker.connections[0].relays, today);
+        // The shared key is retired, and Bob's browsers keep today's relays, not the default.
+        assert!(!bunker.connections.iter().any(|c| c.browsers));
+        assert_eq!(bunker.retired_shared_keys, [shared]);
+        assert_eq!(bunker.browser_relays.get(&bob.pubkey), Some(&today));
         vault
             .bunker_set_relays(&["wss://new.example".into()])
             .unwrap();

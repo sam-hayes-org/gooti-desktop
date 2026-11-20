@@ -5,10 +5,10 @@ use crate::updates::UpdateInfo;
 use gooti_core::activity::ActivityEntry;
 use gooti_core::backup::flow::{self, BackupOutcome};
 use gooti_core::backup::phrase::generate_passphrase;
-use gooti_core::bunker::handler::Ask;
 use gooti_core::bunker::policy::{Remember, Trust};
 use gooti_core::bunker::pool::RelayStatus;
-use gooti_core::bunker::store::{BunkerInfo, ConnectionDetail};
+use gooti_core::bunker::service::PendingAsk;
+use gooti_core::bunker::store::{BrowserList, BunkerInfo, ConnectionDetail, IdentityBrowsers};
 use gooti_core::{
     AppSettingsChange, BackupInfo, Custody, IdentitySummary, LockSettingsChange, NewKey, Settings,
     VaultStatus,
@@ -231,6 +231,19 @@ pub fn identity_rename<R: Runtime>(
     Ok(renamed)
 }
 
+/// "Keep as a regular identity" for a site identity a browser made.
+#[tauri::command]
+pub fn identity_keep_regular<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<IdentitySummary> {
+    state.touch();
+    let kept = state.gooti().vault_mut().keep_as_regular_identity(&id)?;
+    state.kick_backup(&app);
+    Ok(kept)
+}
+
 #[tauri::command]
 pub fn identity_set_color<R: Runtime>(
     app: AppHandle<R>,
@@ -362,6 +375,35 @@ pub async fn backup_join<R: Runtime>(
     Ok(state.gooti().vault().backup_info()?)
 }
 
+/// "Devices": every Gooti with this backup, read from the relays. This desktop first.
+#[tauri::command]
+pub async fn backup_devices(state: State<'_, AppState>) -> CommandResult<flow::DeviceList> {
+    state.touch();
+    Ok(state.backup_runner().devices().await?)
+}
+
+/// "Rename" this desktop in Devices. Publishes the name at once.
+#[tauri::command]
+pub async fn backup_device_rename(
+    state: State<'_, AppState>,
+    name: String,
+) -> CommandResult<flow::DeviceList> {
+    state.touch();
+    state.backup_runner().rename_device(&name).await?;
+    Ok(state.backup_runner().devices().await?)
+}
+
+/// "Remove from list" in Devices. The device comes back when it backs up again.
+#[tauri::command]
+pub async fn backup_device_remove(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<flow::DeviceList> {
+    state.touch();
+    state.backup_runner().remove_device(&id).await?;
+    Ok(state.backup_runner().devices().await?)
+}
+
 #[tauri::command]
 pub async fn backup_now<R: Runtime>(
     app: AppHandle<R>,
@@ -447,7 +489,7 @@ pub fn bunker_info(state: State<'_, AppState>) -> CommandResult<BunkerView> {
 }
 
 #[tauri::command]
-pub fn bunker_pending(state: State<'_, AppState>) -> Vec<Ask> {
+pub fn bunker_pending(state: State<'_, AppState>) -> Vec<PendingAsk> {
     state.bunker().map(|b| b.pending()).unwrap_or_default()
 }
 
@@ -552,6 +594,72 @@ pub fn bunker_revoke(state: State<'_, AppState>, connection_id: String) -> Comma
     state.gooti().vault_mut().bunker_revoke(&connection_id)?;
     state.refresh_bunker();
     Ok(())
+}
+
+/// "Browsers" in Connections: each browser with its own key, and the shared key while it works.
+#[tauri::command]
+pub fn bunker_browsers(state: State<'_, AppState>) -> CommandResult<BrowserList> {
+    Ok(state.gooti().vault().bunker_browsers()?)
+}
+
+/// "Disconnect" on a browser: its key stops working at once, on every Gooti Desktop.
+#[tauri::command]
+pub fn bunker_browser_disconnect<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    client_pubkey: String,
+) -> CommandResult<BrowserList> {
+    state.touch();
+    state
+        .gooti()
+        .vault_mut()
+        .bunker_disconnect_browser(&client_pubkey)?;
+    state.refresh_bunker();
+    state.kick_backup(&app);
+    Ok(state.gooti().vault().bunker_browsers()?)
+}
+
+/// "Browsers" on a Desktop only identity's page: trust and relays, the same for every browser.
+#[tauri::command]
+pub fn identity_browsers(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<IdentityBrowsers> {
+    Ok(state.gooti().vault().bunker_identity_browsers(&id)?)
+}
+
+#[tauri::command]
+pub fn identity_set_browser_trust<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    id: String,
+    trust: Trust,
+) -> CommandResult<IdentityBrowsers> {
+    state.touch();
+    let settings = state
+        .gooti()
+        .vault_mut()
+        .bunker_set_identity_browser_trust(&id, trust)?;
+    state.kick_backup(&app);
+    Ok(settings)
+}
+
+/// Backup takes the new relays to the browsers.
+#[tauri::command]
+pub fn identity_set_browser_relays<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    id: String,
+    relays: Vec<String>,
+) -> CommandResult<IdentityBrowsers> {
+    state.touch();
+    let settings = state
+        .gooti()
+        .vault_mut()
+        .bunker_set_identity_browser_relays(&id, &relays)?;
+    state.refresh_bunker();
+    state.kick_backup(&app);
+    Ok(settings)
 }
 
 #[tauri::command]

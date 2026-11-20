@@ -22,6 +22,12 @@ pub enum Error {
     UnreadableVault,
     #[error("Enter a nick.")]
     NickRequired,
+    #[error("Enter a name.")]
+    NameRequired,
+    #[error("Unknown device.")]
+    UnknownDevice,
+    #[error("This desktop cannot remove itself.")]
+    RemoveThisDevice,
     #[error("This is not a private key. Paste an nsec, an ncryptsec, or a hex key.")]
     InvalidPrivateKey,
     #[error("Enter the password for this ncryptsec key.")]
@@ -72,9 +78,11 @@ pub enum Error {
     #[error("This app chose its relays when it connected. Connect it again to change them.")]
     AppRelaysFixed,
     #[error(
-        "This connection is how your browsers reach a Desktop only identity. Use the identity in browsers again to remove it."
+        "This connection is how a browser reaches a Desktop only identity. Disconnect the browser under Connections → Browsers."
     )]
     BrowsersConnection,
+    #[error("Only a Desktop only identity has browsers that sign through this desktop.")]
+    NotDesktopOnly,
     #[error("The keychain is not available: {0}")]
     Keychain(String),
     #[error("Could not save: {0}")]
@@ -92,6 +100,9 @@ impl Error {
             Error::PasswordTooShort => "password_too_short",
             Error::UnreadableVault => "unreadable_vault",
             Error::NickRequired => "nick_required",
+            Error::NameRequired => "name_required",
+            Error::UnknownDevice => "unknown_device",
+            Error::RemoveThisDevice => "remove_this_device",
             Error::InvalidPrivateKey => "invalid_private_key",
             Error::KeyPasswordRequired => "key_password_required",
             Error::InvalidKeyPassword => "invalid_key_password",
@@ -116,6 +127,7 @@ impl Error {
             Error::NoBrowserRelay => "no_browser_relay",
             Error::AppRelaysFixed => "app_relays_fixed",
             Error::BrowsersConnection => "browsers_connection",
+            Error::NotDesktopOnly => "not_desktop_only",
             Error::Keychain(_) => "keychain",
             Error::Io(_) => "io",
         }

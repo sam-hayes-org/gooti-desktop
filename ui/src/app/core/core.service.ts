@@ -9,7 +9,6 @@ export type InfoLink = 'website' | 'source' | 'author';
 /** Mirrors `gooti_core::AppInfo`. */
 export interface AppInfo {
   version: string;
-  channel: string;
 }
 
 /** Mirrors `gooti_core::VaultStatus`. */
@@ -32,6 +31,8 @@ export interface IdentitySummary {
   servedElsewhere: boolean;
   /** `desktop`: browsers never get the key; they sign through a Gooti Desktop. */
   custody: Custody;
+  /** A site-only identity: the host a browser made it for. `null` for a regular identity. */
+  site: string | null;
 }
 
 export type Custody = 'shared' | 'desktop';
@@ -83,6 +84,17 @@ export interface BackupInfo {
   contentChars: number;
   /** The relays hold everything only this desktop holds: a reset loses nothing a restore cannot bring back. */
   desktopCurrent: boolean;
+}
+
+/** Mirrors `gooti_core::backup::flow::DeviceRow`: one Gooti in "Devices". */
+export interface DeviceRow {
+  id: string;
+  name: string;
+  app: 'browser' | 'desktop';
+  /** This desktop. */
+  here: boolean;
+  /** When it last backed up (ms). `null` for this desktop before its first device record. */
+  backedUpAt: number | null;
 }
 
 /** Mirrors `gooti_core::backup::flow::BackupOutcome`. */
@@ -187,9 +199,15 @@ export interface BunkerAsk {
   connectionId: string;
   identityPubkey: string;
   clientPubkey: string;
-  method: 'sign_event' | 'nip04_encrypt' | 'nip04_decrypt' | 'nip44_encrypt' | 'nip44_decrypt';
+  /** `connect`: a Gooti browser asks to sign through this desktop with its own key. */
+  method: 'sign_event' | 'nip04_encrypt' | 'nip04_decrypt' | 'nip44_encrypt' | 'nip44_decrypt' | 'connect';
   params: string[];
   receivedAt: number;
+  /**
+   * How often the app sent this request while it waited (it stopped waiting and asked again). One
+   * answer covers them all. Only in the waiting list.
+   */
+  times?: number;
   details: {
     kind: number | null;
     content: string | null;
@@ -198,7 +216,37 @@ export interface BunkerAsk {
     peer: string | null;
     /** The site, for a request from Gooti browsers that names it. */
     site?: string;
+    /** For `connect`: the browser's name and code. */
+    browser?: { name: string; code: string };
   };
+}
+
+/** Mirrors `gooti_core::bunker::store::BrowserList`: "Browsers" in Connections. */
+export interface BrowserList {
+  browsers: BrowserInfo[];
+}
+
+export interface BrowserInfo {
+  clientPubkey: string;
+  name: string;
+  /** Also shown in that browser's Settings → Devices. */
+  code: string;
+  approvedAt: number | null;
+  lastUsedAt: number | null;
+}
+
+/** Mirrors `gooti_core::bunker::store::IdentityBrowsers`: one Desktop only identity's browsers. */
+export interface IdentityBrowsers {
+  trust: Trust;
+  relays: string[];
+  /** Choices remembered in the approval window, per browser, that still apply. */
+  rules: BrowserRule[];
+}
+
+/** A remembered choice of one browser. Forget it on its connection. */
+export interface BrowserRule extends Rule {
+  connectionId: string;
+  browser: string;
 }
 
 export interface RelayFailure {
@@ -383,6 +431,13 @@ export class CoreService {
     return updated;
   }
 
+  /** "Keep as a regular identity" for a site-only identity. */
+  async keepAsRegularIdentity(id: string): Promise<IdentitySummary> {
+    const updated = await this.#call<IdentitySummary>('identity_keep_regular', { id });
+    await this.refreshIdentities();
+    return updated;
+  }
+
   async setIdentityColor(id: string, color: string | null): Promise<IdentitySummary> {
     const updated = await this.#call<IdentitySummary>('identity_set_color', { id, color });
     await this.refreshIdentities();
@@ -472,6 +527,20 @@ export class CoreService {
     return this.#call('backup_disable');
   }
 
+  /** "Devices": every Gooti with this backup, from the relays. This desktop first. */
+  async backupDevices(): Promise<DeviceRow[]> {
+    return (await this.#call<{ devices: DeviceRow[] }>('backup_devices')).devices;
+  }
+
+  async renameDevice(name: string): Promise<DeviceRow[]> {
+    return (await this.#call<{ devices: DeviceRow[] }>('backup_device_rename', { name })).devices;
+  }
+
+  /** "Remove from list". It comes back when that device backs up again. */
+  async removeDevice(id: string): Promise<DeviceRow[]> {
+    return (await this.#call<{ devices: DeviceRow[] }>('backup_device_remove', { id })).devices;
+  }
+
   // Bunker
 
   bunkerInfo(): Promise<BunkerInfo> {
@@ -548,6 +617,36 @@ export class CoreService {
   async bunkerRevoke(connectionId: string): Promise<void> {
     await this.#call('bunker_revoke', { connectionId });
     this.#bunkerChanged();
+  }
+
+  /** "Browsers" in Connections. */
+  bunkerBrowsers(): Promise<BrowserList> {
+    return this.#call('bunker_browsers');
+  }
+
+  /** Its key stops working at once, on every Gooti Desktop. */
+  async bunkerBrowserDisconnect(clientPubkey: string): Promise<BrowserList> {
+    const list = await this.#call<BrowserList>('bunker_browser_disconnect', { clientPubkey });
+    this.#bunkerChanged();
+    return list;
+  }
+
+  /** How far browsers may go for a Desktop only identity, and the relays they reach it on. */
+  identityBrowsers(id: string): Promise<IdentityBrowsers> {
+    return this.#call('identity_browsers', { id });
+  }
+
+  async setIdentityBrowserTrust(id: string, trust: Trust): Promise<IdentityBrowsers> {
+    const settings = await this.#call<IdentityBrowsers>('identity_set_browser_trust', { id, trust });
+    this.#bunkerChanged();
+    return settings;
+  }
+
+  /** Backup takes the new relays to the browsers. */
+  async setIdentityBrowserRelays(id: string, relays: string[]): Promise<IdentityBrowsers> {
+    const settings = await this.#call<IdentityBrowsers>('identity_set_browser_relays', { id, relays });
+    this.#bunkerChanged();
+    return settings;
   }
 
   async bunkerSetPaused(paused: boolean): Promise<void> {

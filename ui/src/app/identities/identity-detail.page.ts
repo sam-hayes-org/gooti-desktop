@@ -2,7 +2,9 @@ import { Component, OnDestroy, effect, inject, input, signal } from '@angular/co
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { relaysFromText, relaysToText } from '../backup/relays';
-import { CoreService, IdentitySummary, errorMessage } from '../core/core.service';
+import { TRUST_CHOICES, ruleUntil } from '../connections/connection.page';
+import { methodLabel } from '../connections/kinds';
+import { BrowserRule, CoreService, IdentityBrowsers, IdentitySummary, Trust, errorMessage } from '../core/core.service';
 import { ConfirmService } from '../shared/confirm.service';
 import { CopyButton } from '../shared/copy-button';
 import { colorForPubkey } from './appearance';
@@ -34,6 +36,12 @@ export class IdentityDetailPage implements OnDestroy {
   protected readonly moving = signal(false);
   protected readonly relaysText = signal('');
   protected readonly exportError = signal('');
+  /** A Desktop only identity: trust and relays for all its browsers. */
+  protected readonly browsers = signal<IdentityBrowsers | null>(null);
+  protected readonly browserRelaysText = signal('');
+  protected readonly relaysNotice = signal('');
+  protected readonly trustChoices = TRUST_CHOICES;
+  protected readonly ruleUntil = ruleUntil;
 
   constructor() {
     effect(() => {
@@ -59,9 +67,51 @@ export class IdentityDetailPage implements OnDestroy {
       const identity = await this.#core.identity(id);
       this.identity.set(identity);
       this.nick.set(identity.nick);
+      await this.#loadBrowsers(identity);
     } catch {
       await this.#router.navigateByUrl('/identities');
     }
+  }
+
+  async #loadBrowsers(identity: IdentitySummary): Promise<void> {
+    this.relaysNotice.set('');
+    if (identity.custody !== 'desktop' || !identity.hasPrivateKey) {
+      this.browsers.set(null);
+      return;
+    }
+    const settings = await this.#core.identityBrowsers(identity.id).catch(() => null);
+    this.browsers.set(settings);
+    this.browserRelaysText.set(relaysToText(settings?.relays ?? []));
+  }
+
+  protected ruleLabel(rule: BrowserRule): string {
+    return methodLabel(rule.method, rule.kind);
+  }
+
+  async forgetRule(rule: BrowserRule): Promise<void> {
+    await this.#run(async (identity) => {
+      await this.#core.bunkerForget(rule.connectionId, rule.method, rule.kind ?? null);
+      this.browsers.set(await this.#core.identityBrowsers(identity.id));
+    });
+  }
+
+  async setBrowserTrust(trust: Trust): Promise<void> {
+    await this.#run(async (identity) => {
+      this.browsers.set(await this.#core.setIdentityBrowserTrust(identity.id, trust));
+    });
+  }
+
+  async saveBrowserRelays(): Promise<void> {
+    this.relaysNotice.set('');
+    await this.#run(async (identity) => {
+      const settings = await this.#core.setIdentityBrowserRelays(
+        identity.id,
+        relaysFromText(this.browserRelaysText()),
+      );
+      this.browsers.set(settings);
+      this.browserRelaysText.set(relaysToText(settings.relays));
+      this.relaysNotice.set('Updated the relays');
+    });
   }
 
   protected nickChanged(): boolean {
@@ -72,6 +122,13 @@ export class IdentityDetailPage implements OnDestroy {
   async saveNick(): Promise<void> {
     await this.#run(async (identity) => {
       this.identity.set(await this.#core.renameIdentity(identity.id, this.nick()));
+    });
+  }
+
+  /** A site-only identity leaves that group on every device. */
+  async keepRegular(): Promise<void> {
+    await this.#run(async (identity) => {
+      this.identity.set(await this.#core.keepAsRegularIdentity(identity.id));
     });
   }
 
@@ -95,10 +152,10 @@ export class IdentityDetailPage implements OnDestroy {
 
   async moveToDesktop(): Promise<void> {
     await this.#run(async (identity) => {
-      this.identity.set(
-        await this.#core.setCustody(identity.id, 'desktop', relaysFromText(this.relaysText())),
-      );
+      const moved = await this.#core.setCustody(identity.id, 'desktop', relaysFromText(this.relaysText()));
+      this.identity.set(moved);
       this.moving.set(false);
+      await this.#loadBrowsers(moved);
     });
   }
 
@@ -117,7 +174,9 @@ export class IdentityDetailPage implements OnDestroy {
     );
     if (yes) {
       await this.#run(async (identity) => {
-        this.identity.set(await this.#core.setCustody(identity.id, 'shared'));
+        const back = await this.#core.setCustody(identity.id, 'shared');
+        this.identity.set(back);
+        await this.#loadBrowsers(back);
       });
     }
   }

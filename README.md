@@ -21,6 +21,10 @@ never reach the UI, except when you ask to show an nsec.
   this desktop). New identities are Desktop only unless you untick it. "Move key to desktop" and
   "Use in browsers again" switch later.
 - **Keys:** show the nsec on request, or export an ncryptsec with a password of your choice.
+- **Site-only identities:** an identity a browser made with "New site-only identity", for testing a
+  site and throwing it away later. Identities lists them in their own group, "Site-only identities", below "Regular identities" (both open; each can be closed; an info icon explains them). Its
+  page names the site and offers **Keep as a regular identity**, which turns it into a regular one on
+  every device. Delete it like any identity.
 
 ## Apps (NIP-46)
 
@@ -32,8 +36,18 @@ never reach the UI, except when you ask to show an nsec.
   and press Connect.
 - **Privacy:** each identity signs for apps with its own signer key, so relays cannot tell which
   identity an app uses.
-- **Gooti browsers:** a Desktop only identity gets one connection named "Gooti browsers" for all your
-  browsers with the extension. Requests from it name the site ("primal.net through Gooti browsers").
+- **Browsers with their own key** (`docs/DESIGN-browser-keys.md`): a newer extension asks once, with
+  its own key that never goes into the backup. A window asks **Allow this browser?** with its name and
+  a short code the browser shows too; Allow covers every Desktop only identity, Deny blocks the key for 90 days.
+  The request carries a secret from the backup, so someone who only sees this desktop's signer key
+  on a relay cannot ask.
+  Connections → **Browsers** lists each browser (name, code, when allowed, last used) with
+  **Disconnect**, which stops its key at once, on every Gooti Desktop. How far browsers may go without
+  asking is set per identity, on a Desktop only identity's page under **Browsers** (default Basic), the
+  same for every browser. That section also lists the choices remembered for each browser, with
+  **Forget**. Requests from a
+  browser name the site ("primal.net through Work laptop"). There is no shared browser key: backup
+  carries none, and a browser on Gooti 2.0.0 is told to update.
 
 ## Permissions and activity
 
@@ -43,6 +57,9 @@ never reach the UI, except when you ask to show an nsec.
 - **Remembered choices:** in the request window, Approve or Reject only this time, for 5 minutes, an
   hour, a day, or always. Sensitive kinds are remembered for an hour at most. A remembered Reject
   always wins. Each app's page lists its remembered choices, and you can forget them.
+- **An app that asks again:** a site that stops waiting and sends the same request again (Primal gives up
+  after about 8 seconds) opens no second window. The window says "Asked 3 times while waiting", and
+  one Approve or Reject answers every copy, each with its own signature.
 - **Requests** show in a small window and as a notification. Unanswered requests time out after
   5 minutes. **Pause all apps** answers every app with an error until you turn it off.
 - **Activities:** requests, connects, removals and backups, newest first (the latest 500). Filter by
@@ -54,8 +71,9 @@ never reach the UI, except when you ask to show an nsec.
 - **Default relays for apps** (Settings), starting with `wss://relay.getgooti.com`. They fill new
   bunker links, new Desktop only identities, and "Move key to desktop". Each of those keeps its own
   copy, so changing the default changes nothing in use.
-- **Each app keeps its relays:** the ones its link named. Gooti browsers' relays can be changed on
-  their page; backup takes the change to the browsers.
+- **Each app keeps its relays:** the ones its link named. The relays browsers use for a Desktop only
+  identity can be changed on its page under **Browsers**; that changes them for all its browsers, and
+  backup takes the change to them.
 - **Listening on** (Connections) shows every relay in use, its state, and which apps use it. The
   sidebar shows how many are connected (green, amber, red).
 - `ws://` is accepted only for a relay on this computer (`localhost`, `127.0.0.1`, `[::1]`).
@@ -74,6 +92,13 @@ never reach the UI, except when you ask to show an nsec.
   from the backup answers none until you choose **Sign here** (Identities) or **Sign here instead**
   (on an identity's or an app's page); the other desktop stops at its next backup. Connections marks
   each app another Gooti Desktop answers.
+- **Devices** (on the Backup page): every Gooti that uses this backup, browsers and desktops, with
+  when each last backed up. Each one publishes a small *device record* (`d` = `gooti-device:<id>`,
+  sealed with the shared record's keys): its name, whether it is a browser or a desktop, and the time
+  of its last backup, at most once an hour. **Rename** names this desktop ("Gooti Desktop on Linux"
+  until then). **Remove from list** takes another device off the list; it comes back with its next backup, which
+  reads its own record along with the shared record and publishes it again when it was removed. It
+  does not lock that device out: it still holds the passphrase.
 
 ## Locking and security
 

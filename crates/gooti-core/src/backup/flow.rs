@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use nostr::event::Event;
 use serde::Serialize;
 
 use super::blob::{open_shared_document, seal_shared_document};
@@ -14,6 +15,10 @@ use super::canonical::canonical_shared_document;
 use super::changes::{ChangeReport, describe_changes};
 use super::desktop::{
     DesktopDocument, merge_desktop_documents, open_desktop_document, seal_desktop_document,
+};
+use super::device::{
+    DeviceApp, DeviceEntry, DeviceRecord, build_device_event, device_tag, devices_from_events,
+    is_device_id, read_device_event, seal_device,
 };
 use super::document::SharedDocument;
 use super::event::{DESKTOP_D_TAG, SHARED_D_TAG, build_backup_event, read_backup_payload};
@@ -60,19 +65,39 @@ pub async fn fetch_shared_document(
 struct Remote {
     document: Option<SharedDocument>,
     created_at: Option<u64>,
+    /// The events with the `also_d` tag asked for, read in the same request.
+    also: Option<Vec<Event>>,
 }
 
 async fn fetch_remote(keys: &BackupKeys, relays: &[String], io: &impl RelayIo) -> Result<Remote> {
+    fetch_remote_also(keys, relays, io, None).await
+}
+
+async fn fetch_remote_also(
+    keys: &BackupKeys,
+    relays: &[String],
+    io: &impl RelayIo,
+    also_d: Option<&str>,
+) -> Result<Remote> {
     if relays.is_empty() {
         return Err(Error::NoRelays);
     }
-    let Some(event) = io
-        .fetch_newest(relays, &keys.pubkey_hex(), SHARED_D_TAG)
-        .await?
-    else {
+    let (newest, also) = match also_d {
+        Some(also_d) => {
+            io.fetch_newest_also(relays, &keys.pubkey_hex(), SHARED_D_TAG, also_d)
+                .await?
+        }
+        None => (
+            io.fetch_newest(relays, &keys.pubkey_hex(), SHARED_D_TAG)
+                .await?,
+            None,
+        ),
+    };
+    let Some(event) = newest else {
         return Ok(Remote {
             document: None,
             created_at: None,
+            also,
         });
     };
     let document = read_backup_payload(&event, SHARED_D_TAG)
@@ -84,6 +109,7 @@ async fn fetch_remote(keys: &BackupKeys, relays: &[String], io: &impl RelayIo) -
     Ok(Remote {
         document,
         created_at: Some(event.created_at.as_secs()),
+        also,
     })
 }
 
@@ -167,7 +193,19 @@ pub async fn back_up_shared(
     relays: &[String],
     io: &impl RelayIo,
 ) -> Result<SharedRound> {
-    let fetched = fetch_remote(keys, relays, io).await?;
+    Ok(back_up_shared_also(local, keys, relays, io, None).await?.0)
+}
+
+/// `back_up_shared`, also reading the events with `also_d` (this desktop's device record) in
+/// the same request.
+async fn back_up_shared_also(
+    local: &SharedDocument,
+    keys: &BackupKeys,
+    relays: &[String],
+    io: &impl RelayIo,
+    also_d: Option<&str>,
+) -> Result<(SharedRound, Option<Vec<Event>>)> {
+    let fetched = fetch_remote_also(keys, relays, io, also_d).await?;
     let remote = fetched.document;
     let merged = match &remote {
         Some(remote) => merge_shared_documents(local, remote),
@@ -182,12 +220,15 @@ pub async fn back_up_shared(
         publish_after(&merged, keys, relays, io, fetched.created_at).await?;
     }
     let report = describe_changes(local, remote.as_ref(), &merged, published);
-    Ok(SharedRound {
-        document: merged,
-        published,
-        changed,
-        report,
-    })
+    Ok((
+        SharedRound {
+            document: merged,
+            published,
+            changed,
+            report,
+        },
+        fetched.also,
+    ))
 }
 
 /// Runs the flows against one `Gooti` and one way to reach relays.
@@ -265,7 +306,126 @@ impl<IO: RelayIo + 'static> BackupRunner<IO> {
     pub async fn back_up_now(&self) -> Result<BackupOutcome> {
         let _busy = self.mark_busy();
         let _running = self.running.lock().await;
-        self.rounds().await
+        let (outcome, seen) = self.rounds_seeing_device().await?;
+        // "Devices" shows an older time until the next backup when this fails. The backup stands.
+        let _ = self.publish_device(false, seen).await;
+        Ok(outcome)
+    }
+
+    /// Publishes this desktop's device record: after a backup at most once an hour, or now with
+    /// `force` (a rename). `seen` is this desktop's device events as the backup read them: when
+    /// they do not list it (another device removed it from Devices), it is published now, so it
+    /// is back on the list after this backup. The caller holds `running`, or needs no order with
+    /// backups.
+    async fn publish_device(&self, force: bool, seen: Option<Vec<Event>>) -> Result<()> {
+        let at = time::now_ms() as f64;
+        // The newest record of this desktop the backup saw, and whether it lists it.
+        let mut newest_seen = None;
+        let mut removed = false;
+        if let Some(events) = seen {
+            let plan = self.gooti().vault_mut().devices_plan()?;
+            let pubkey = plan.keys.pubkey_hex();
+            newest_seen = events
+                .iter()
+                .filter(|event| {
+                    read_device_event(event, &pubkey).is_some_and(|(id, _)| id == plan.this_id)
+                })
+                .map(|event| event.created_at.as_secs())
+                .max();
+            removed = !devices_from_events(&events, &plan.keys)
+                .iter()
+                .any(|device| device.id == plan.this_id);
+        }
+        let Some(plan) = self.gooti().vault_mut().device_plan(force || removed, at)? else {
+            return Ok(());
+        };
+        let payload = seal_device(
+            &DeviceEntry::Live(plan.record.clone()),
+            &plan.keys.encryption_key,
+        )?;
+        // A replaceable event: a rename right after a backup, or a record after a removal, must
+        // still be the later one.
+        let previous = plan
+            .published_at
+            .map(|ms| (ms / 1000.0) as u64)
+            .max(newest_seen);
+        let event = build_device_event(
+            &plan.keys,
+            &plan.record.id,
+            &payload,
+            publish_time(previous),
+        );
+        self.io.publish(&plan.relays, &event).await?;
+        self.gooti()
+            .vault_mut()
+            .device_published(&plan.record.id, at)
+    }
+
+    /// "Devices": every Gooti with this backup, this desktop first.
+    pub async fn devices(&self) -> Result<DeviceList> {
+        let plan = self.gooti().vault_mut().devices_plan()?;
+        if plan.relays.is_empty() {
+            return Err(Error::NoRelays);
+        }
+        let events = self
+            .io
+            .fetch_all(&plan.relays, &plan.keys.pubkey_hex())
+            .await?;
+        let devices = devices_from_events(&events, &plan.keys);
+        let mut rows: Vec<DeviceRow> = Vec::with_capacity(devices.len() + 1);
+        let here = devices.iter().find(|d| d.id == plan.this_id);
+        rows.push(match here {
+            Some(record) => DeviceRow::from_record(record, true),
+            None => DeviceRow {
+                id: plan.this_id.clone(),
+                name: plan.this_name.clone(),
+                app: DeviceApp::Desktop,
+                here: true,
+                backed_up_at: None,
+            },
+        });
+        rows.extend(
+            devices
+                .iter()
+                .filter(|d| d.id != plan.this_id)
+                .map(|record| DeviceRow::from_record(record, false)),
+        );
+        Ok(DeviceList { devices: rows })
+    }
+
+    /// "Rename" this desktop in Devices: saved here, then published at once.
+    pub async fn rename_device(&self, name: &str) -> Result<()> {
+        self.gooti().vault_mut().rename_device(name)?;
+        self.publish_device(true, None).await
+    }
+
+    /// "Remove from list". The device shows up again when it backs up.
+    pub async fn remove_device(&self, id: &str) -> Result<()> {
+        if !is_device_id(id) {
+            return Err(Error::UnknownDevice);
+        }
+        let plan = self.gooti().vault_mut().devices_plan()?;
+        if plan.this_id == id {
+            return Err(Error::RemoveThisDevice);
+        }
+        let entry = DeviceEntry::Removed {
+            id: id.to_string(),
+            removed_at: time::now_ms() as f64,
+        };
+        let payload = seal_device(&entry, &plan.keys.encryption_key)?;
+        // Later than that device's newest record, which it replaces.
+        let pubkey = plan.keys.pubkey_hex();
+        let newest = self
+            .io
+            .fetch_all(&plan.relays, &pubkey)
+            .await?
+            .iter()
+            .filter(|event| read_device_event(event, &pubkey).is_some_and(|(found, _)| found == id))
+            .map(|event| event.created_at.as_secs())
+            .max();
+        let event = build_device_event(&plan.keys, id, &payload, publish_time(newest));
+        self.io.publish(&plan.relays, &event).await?;
+        Ok(())
     }
 
     /// Backups until nothing new is left to send, a few rounds at most. The caller holds `running`.
@@ -273,13 +433,35 @@ impl<IO: RelayIo + 'static> BackupRunner<IO> {
     /// shared record (Move key to desktop) is then always in the desktop record first; when
     /// that fails, the shared record is not sent and still holds the key.
     async fn rounds(&self) -> Result<BackupOutcome> {
+        Ok(self.rounds_also(None).await?.0)
+    }
+
+    /// `rounds`, also reading this desktop's device record with the shared record.
+    async fn rounds_seeing_device(&self) -> Result<(BackupOutcome, Option<Vec<Event>>)> {
+        let device_d = self
+            .gooti()
+            .vault_mut()
+            .devices_plan()
+            .ok()
+            .map(|plan| device_tag(&plan.this_id));
+        self.rounds_also(device_d.as_deref()).await
+    }
+
+    async fn rounds_also(
+        &self,
+        also_d: Option<&str>,
+    ) -> Result<(BackupOutcome, Option<Vec<Event>>)> {
+        let mut seen = None;
         let mut published = false;
         let mut changed = false;
         let mut report = ChangeReport::default();
         for _ in 0..MAX_ROUNDS {
             published |= self.desktop_round().await?.0;
             let plan = self.gooti().vault_mut().shared_plan()?;
-            let result = back_up_shared(&plan.document, &plan.keys, &plan.relays, &self.io).await?;
+            let (result, also) =
+                back_up_shared_also(&plan.document, &plan.keys, &plan.relays, &self.io, also_d)
+                    .await?;
+            seen = also.or(seen);
             published |= result.published;
             changed |= result.changed;
             merge_reports(&mut report, result.report);
@@ -301,7 +483,7 @@ impl<IO: RelayIo + 'static> BackupRunner<IO> {
         } else {
             BackupResult::Current
         };
-        Ok(BackupOutcome { result, report })
+        Ok((BackupOutcome { result, report }, seen))
     }
 
     /// Merges the desktop record with the relays: whether it sent one, and whether the shared
@@ -448,6 +630,34 @@ impl<IO: RelayIo + 'static> BackupRunner<IO> {
             }
         });
     }
+}
+
+/// One row in "Devices". `here` is this desktop; `backed_up_at` is `None` before its first record.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRow {
+    pub id: String,
+    pub name: String,
+    pub app: DeviceApp,
+    pub here: bool,
+    pub backed_up_at: Option<f64>,
+}
+
+impl DeviceRow {
+    fn from_record(record: &DeviceRecord, here: bool) -> DeviceRow {
+        DeviceRow {
+            id: record.id.clone(),
+            name: record.name.clone(),
+            app: record.app,
+            here,
+            backed_up_at: Some(record.backed_up_at),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeviceList {
+    pub devices: Vec<DeviceRow>,
 }
 
 /// Collects the lines of several rounds without repeats.

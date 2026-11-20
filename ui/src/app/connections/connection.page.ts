@@ -11,6 +11,15 @@ import { methodLabel } from './kinds';
 /** How many of an app's entries its page shows. */
 export const RECENT_ACTIVITY = 20;
 
+/** "Always", or until when a remembered choice holds. */
+export function ruleUntil(rule: Rule): string {
+  if (!rule.expiresAt) {
+    return 'Always';
+  }
+  const time = new Date(rule.expiresAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  return `Until ${time}`;
+}
+
 export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
   {
     value: 'ask',
@@ -160,8 +169,8 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
 
         @if (detail.browsers) {
           <p class="copy">
-            This is how your browsers reach {{ detail.identityNick }}, whose key stays on this
-            desktop. To end it, use the identity in browsers again on its page.
+            This is how {{ detail.name }} reaches {{ detail.identityNick }}, whose key stays on this
+            desktop. To end it, disconnect the browser under Connections → Browsers.
           </p>
         } @else {
           <section class="group">
@@ -304,11 +313,7 @@ export class ConnectionPage {
   }
 
   protected until(rule: Rule): string {
-    if (!rule.expiresAt) {
-      return 'Always';
-    }
-    const time = new Date(rule.expiresAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-    return `Until ${time}`;
+    return ruleUntil(rule);
   }
 
   async setTrust(trust: Trust): Promise<void> {

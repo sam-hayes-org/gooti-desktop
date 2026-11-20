@@ -116,3 +116,15 @@ h1 {
 .waiting {
   text-align: center;
 }
+
+.browser-code {
+  margin: 0 0 8px;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+}
+
+// The app asked again while this request waited: one answer covers them all.
+.repeats {
+  margin: 0;
+  color: #f0c36d;
+}

@@ -150,7 +150,7 @@ An end-to-end test runs the extension's `connectBunker` against the desktop bunk
   custody time for a key it holds (a 2.0 browser dropped the field) sends its row again.
 - The site in requests to the desktop: only for an identity whose synced row is a pointer with
   `custodyAt` and the same signer key. The extension adds `{"site": host}` after the standard NIP-46
-  parameters. The desktop reads it only from the "Gooti browsers" connection and shows it in the
+  parameters. The desktop reads it only from a browser's connection and shows it in the
   approval window and Activity.
 - When a bunker does not answer: a ping first (8 s, skipped if the desktop answered in the last
   2 minutes), then up to 5.5 minutes for the desktop's own 5-minute approval. A small notice window
@@ -159,9 +159,9 @@ An end-to-end test runs the extension's `connectBunker` against the desktop bunk
 ## Notes for M5
 
 - A Desktop only identity syncs as a bunker pointer: this desktop's signer key for it, the bunker's
-  `wss://` relays (the extension accepts only those), `askSite`, and a session key made here. All synced
-  browsers share that session key as one connection, "Gooti browsers", trust Basic. It cannot be removed
-  on its own; making the identity synced again ends it.
+  `wss://` relays (the extension accepts only those) and `askSite`. Until 2026-11-17 it also carried a
+  session key that all browsers shared ("Gooti browsers"); that key is retired, and each browser now
+  connects with its own key (`docs/DESIGN-browser-keys.md`).
 - Every edit is stamped later than the row it replaces, so an edit wins even over a device whose clock
   runs ahead. A Desktop only key that comes back in a merge is replaced by the pointer and sent again.
 - Another Gooti desktop keeps a private key it holds, even when a pointer wins the merge, and follows the
@@ -185,9 +185,8 @@ An end-to-end test runs the extension's `connectBunker` against the desktop bunk
   apps** (Settings, `bunker.relays`). The second is only a template: it fills a new bunker link (Connect
   new app), a new Desktop only identity, and "Move key to desktop", and each keeps its own copy, so
   changing the default changes nothing in use. An app from a `bunker://` link keeps the relays its link
-  named; a `nostrconnect://` app keeps its own; Gooti browsers of a Desktop only identity keep theirs on
-  their connection (editable on its page; the pointer names them and backup takes a change to the
-  browsers). The desktop listens only on relays in use and on those of links still waiting
+  named; a `nostrconnect://` app keeps its own; the browsers of a Desktop only identity keep the identity's browser relays (editable on the identity's page under
+  Browsers; the pointer names them and backup takes a change to the browsers). The desktop listens only on relays in use and on those of links still waiting
   ("Listening on" in Connections). Apps and browsers stored earlier without relays get the default once
   on unlock.
   Its setup and the change for this live in `../gooti-relay`. It refuses a filter with more than one `#p`

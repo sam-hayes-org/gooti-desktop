@@ -9,7 +9,7 @@ use nostr::event::{Event, EventBuilder, EventId, FinalizeEvent, Kind, Tag};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use super::handler::{Ask, Outcome};
+use super::handler::{Ask, BROWSER_CONNECT, BROWSER_DISCONNECTED, Outcome};
 use super::message::{Response, Scheme, response_event};
 use super::policy::{Policy, Reason, Remember, rule_for};
 use super::pool::{RelayPool, RelayStatus};
@@ -21,6 +21,14 @@ use crate::time;
 /// An unanswered request is refused after this, so the app is not left hanging.
 pub const ASK_TIMEOUT_MS: i64 = 5 * 60 * 1000;
 const SEEN_LIMIT: usize = 1000;
+
+/// A waiting request as the approval window lists it: `times` is how often the app sent it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PendingAsk {
+    #[serde(flatten)]
+    pub ask: Ask,
+    pub times: usize,
+}
 
 /// What the UI hears about.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -105,8 +113,20 @@ impl BunkerService {
         self.pool.status()
     }
 
-    pub fn pending(&self) -> Vec<Ask> {
-        self.pending_lock().clone()
+    /// The waiting requests, oldest first. A request an app sent again while the first one waited
+    /// is not listed twice: `times` counts them, and one answer covers them all.
+    pub fn pending(&self) -> Vec<PendingAsk> {
+        let mut listed: Vec<PendingAsk> = Vec::new();
+        for ask in self.pending_lock().iter() {
+            match listed.iter_mut().find(|p| p.ask.same_request(ask)) {
+                Some(first) => first.times += 1,
+                None => listed.push(PendingAsk {
+                    ask: ask.clone(),
+                    times: 1,
+                }),
+            }
+        }
+        listed
     }
 
     /// Stops listening and drops the waiting requests (they cannot be answered while locked).
@@ -144,13 +164,23 @@ impl BunkerService {
     /// The user's answer to a waiting request, and how long to remember it.
     /// `false` when it is no longer waiting.
     pub fn decide(&self, key: &str, approve: bool, remember: Remember) -> Result<bool> {
-        let ask = {
+        let (ask, repeats) = {
             let mut pending = self.pending_lock();
             let Some(at) = pending.iter().position(|ask| ask.key == key) else {
                 return Ok(false);
             };
-            pending.remove(at)
+            let ask = pending.remove(at);
+            // The app asked again meanwhile: the same answer goes to every one of them.
+            let (repeats, rest): (Vec<Ask>, Vec<Ask>) =
+                pending.drain(..).partition(|other| ask.same_request(other));
+            *pending = rest;
+            (ask, repeats)
         };
+        if ask.method == BROWSER_CONNECT {
+            self.decide_browser(&ask, approve)?;
+            (self.notify)(Notice::Pending);
+            return Ok(true);
+        }
         let policy = if approve { Policy::Allow } else { Policy::Deny };
         if let Some(rule) = rule_for(
             remember,
@@ -165,13 +195,40 @@ impl BunkerService {
                 .vault_mut()
                 .bunker_remember(&ask.connection_id, rule);
         }
-        if approve {
-            self.carry_out(&ask, Reason::User)?;
-        } else {
-            self.refuse(&ask, Reason::User)?;
+        for ask in std::iter::once(&ask).chain(&repeats) {
+            if approve {
+                self.carry_out(ask, Reason::User)?;
+            } else {
+                self.refuse(ask, Reason::User)?;
+            }
         }
         (self.notify)(Notice::Pending);
         Ok(true)
+    }
+
+    /// Allow or Deny for a browser that asks to sign with its own key. Allow covers every Desktop
+    /// only identity it asks for later; Deny blocks its key.
+    fn decide_browser(&self, ask: &Ask, approve: bool) -> Result<()> {
+        let name = ask
+            .details
+            .browser
+            .as_ref()
+            .map(|b| b.name.clone())
+            .unwrap_or_default();
+        let response = if approve {
+            self.gooti().vault_mut().bunker_allow_browser(ask)?;
+            Response::ok(&ask.request_id, "ack")
+        } else {
+            self.gooti()
+                .vault_mut()
+                .bunker_block_browser(&ask.client_pubkey, &name)?;
+            Response::error(&ask.request_id, BROWSER_DISCONNECTED)
+        };
+        self.answer(ask, &response)?;
+        self.refresh();
+        (self.notify)(Notice::Connections);
+        (self.notify)(Notice::Activity);
+        Ok(())
     }
 
     /// Signs, encrypts or decrypts with the identity key, answers, and logs it.
@@ -249,8 +306,22 @@ impl BunkerService {
                 let _ = self.refuse(&ask, Reason::Remembered);
             }
             Outcome::Ask(ask) => {
-                self.pending_lock().push((*ask).clone());
-                (self.notify)(Notice::Asked { ask });
+                // A browser asks once per identity; one question covers them all. The others
+                // get their answer when it asks again after Allow.
+                let repeat = ask.method == BROWSER_CONNECT
+                    && self.pending_lock().iter().any(|p| {
+                        p.method == BROWSER_CONNECT && p.client_pubkey == ask.client_pubkey
+                    });
+                // An app that stopped waiting asks the same again: it waits with the first one,
+                // without a window of its own, and gets the same answer.
+                let again = self.pending_lock().iter().any(|p| p.same_request(&ask));
+                if again {
+                    self.pending_lock().push((*ask).clone());
+                    (self.notify)(Notice::Pending);
+                } else if !repeat {
+                    self.pending_lock().push((*ask).clone());
+                    (self.notify)(Notice::Asked { ask });
+                }
             }
             Outcome::Ignore => {}
         }

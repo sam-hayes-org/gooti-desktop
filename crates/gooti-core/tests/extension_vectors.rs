@@ -7,6 +7,10 @@ use std::path::PathBuf;
 use gooti_core::backup::blob::{open_shared_document, seal_shared_document, shared_content_chars};
 use gooti_core::backup::canonical::canonical_shared_document;
 use gooti_core::backup::changes::describe_changes;
+use gooti_core::backup::device::{
+    DeviceApp, DeviceEntry, DeviceRecord, build_device_event, devices_from_events, open_device,
+    read_device, read_device_event, seal_device,
+};
 use gooti_core::backup::document::{SharedDocument, parse_shared_document};
 use gooti_core::backup::event::{SHARED_D_TAG, build_backup_event, read_backup_payload};
 use gooti_core::backup::merge::{active_shared_document, merge_shared_documents};
@@ -201,6 +205,106 @@ fn writes_a_rust_sealed_vault_for_the_extension_to_open() {
     std::fs::write(
         dir.join("rust.json"),
         serde_json::to_string_pretty(&out).unwrap(),
+    )
+    .unwrap();
+}
+
+/// What a reader makes of a device plaintext, written like the extension's `readDevice` result.
+fn device_json(entry: Option<DeviceEntry>) -> Value {
+    match entry {
+        None => Value::Null,
+        Some(DeviceEntry::Live(record)) => serde_json::json!({
+            "id": record.id,
+            "name": record.name,
+            "app": record.app,
+            "backedUpAt": record.backed_up_at,
+        }),
+        Some(DeviceEntry::Removed { id, removed_at }) => {
+            serde_json::json!({ "id": id, "removedAt": removed_at })
+        }
+    }
+}
+
+fn same_numbers(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| same_numbers(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+#[test]
+fn reads_device_records_like_the_extension() {
+    let v = vectors();
+    let keys = derive_shared_keys(v["keys"][0]["phrase"].as_str().unwrap()).unwrap();
+    let events: Vec<Event> = v["devices"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|case| {
+            let event: Event = serde_json::from_value(case["event"].clone()).unwrap();
+            let (id, payload) = read_device_event(&event, &keys.pubkey_hex()).unwrap();
+            assert_eq!(id, case["record"]["id"].as_str().unwrap());
+            let opened = device_json(open_device(payload, &keys.encryption_key));
+            assert!(
+                same_numbers(&opened, &case["record"]),
+                "{opened} vs {}",
+                case["record"]
+            );
+            event
+        })
+        .collect();
+    // The removed device is left out of the list.
+    let listed = devices_from_events(&events, &keys);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "Firefox on Linux");
+
+    for case in v["devices"]["validity"].as_array().unwrap() {
+        let read = device_json(read_device(&case["value"]));
+        assert!(
+            same_numbers(&read, &case["read"]),
+            "{}: {read} vs {}",
+            case["name"],
+            case["read"]
+        );
+    }
+}
+
+#[test]
+fn writes_rust_device_records_for_the_extension_to_open() {
+    let v = vectors();
+    let phrase = v["keys"][2]["phrase"].as_str().unwrap();
+    let keys = derive_shared_keys(phrase).unwrap();
+    let entries = [
+        DeviceEntry::Live(DeviceRecord {
+            id: "0d".repeat(16),
+            name: "Gooti Desktop on Linux".into(),
+            app: DeviceApp::Desktop,
+            backed_up_at: 1_762_000_000_789.0,
+        }),
+        DeviceEntry::Removed {
+            id: "0e".repeat(16),
+            removed_at: 1_762_000_000_999.0,
+        },
+    ];
+    let out: Vec<Value> = entries
+        .into_iter()
+        .map(|entry| {
+            let payload = seal_device(&entry, &keys.encryption_key).unwrap();
+            let event = build_device_event(&keys, entry.id(), &payload, 1_762_000_321);
+            serde_json::json!({ "record": device_json(Some(entry)), "event": event })
+        })
+        .collect();
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/vectors");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("rust-devices.json"),
+        serde_json::to_string_pretty(&serde_json::json!({ "phrase": phrase, "devices": out }))
+            .unwrap(),
     )
     .unwrap();
 }

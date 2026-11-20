@@ -43,6 +43,9 @@ pub struct StoredIdentity {
     /// For `Desktop` custody: the session key browsers use to reach this desktop's bunker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browsers: Option<BrowserLink>,
+    /// A site-only identity: the host a browser made it for. Backup carries it as `site`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     /// Written by the first alpha for a deleted identity. Such rows are dropped when read.
     #[serde(default, skip_serializing)]
     pub deleted_at: Option<i64>,
@@ -123,6 +126,7 @@ impl StoredIdentity {
                 && self.custody_at.is_some(),
             served_elsewhere: false,
             custody: self.custody,
+            site: self.site.clone(),
         }
     }
 
@@ -135,6 +139,7 @@ impl StoredIdentity {
             color: self.color.clone(),
             bunker: self.bunker.clone(),
             custody_at: self.custody_at,
+            site: self.site.clone(),
         }
     }
 
@@ -150,6 +155,7 @@ impl StoredIdentity {
             custody: Custody::Shared,
             custody_at: live.custody_at,
             browsers: None,
+            site: live.site,
             deleted_at: None,
         }
     }
@@ -174,6 +180,8 @@ pub struct IdentitySummary {
     /// This desktop holds the key, but another Gooti Desktop answers apps and browsers for it.
     pub served_elsewhere: bool,
     pub custody: Custody,
+    /// A site-only identity: the host a browser made it for. `None` for a regular identity.
+    pub site: Option<String>,
 }
 
 /// How a new identity gets its key.
@@ -393,6 +401,7 @@ mod tests {
             custody: Custody::Shared,
             custody_at: None,
             browsers: None,
+            site: None,
             deleted_at: None,
         };
         assert!(!format!("{identity:?}").contains(HEX));

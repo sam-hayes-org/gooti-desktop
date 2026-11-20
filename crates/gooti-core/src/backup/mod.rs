@@ -5,6 +5,7 @@ pub mod blob;
 pub mod canonical;
 pub mod changes;
 pub mod desktop;
+pub mod device;
 pub mod document;
 pub mod event;
 pub mod flow;

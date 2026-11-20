@@ -5,6 +5,31 @@
   </div>
 
   @if (ask(); as ask) {
+    @if (ask.method === 'connect') {
+      <h1>Allow this browser?</h1>
+      <div class="who">
+        <span class="app">{{ ask.details.browser?.name ?? 'A browser' }}</span>
+        <span class="copy">wants to sign through this desktop for your Desktop only identities</span>
+      </div>
+      <div class="body">
+        <p class="field-label">Code</p>
+        <p class="mono browser-code">{{ ask.details.browser?.code }}</p>
+        <p class="copy">
+          The browser shows the same code. Asked {{ askedAgo() }}. Allow only a browser you just set up or
+          opened yourself. Deny blocks this browser for 90 days.
+        </p>
+      </div>
+      @if (error()) {
+        <p class="sam-error" role="alert">{{ error() }}</p>
+      }
+      <div class="buttons">
+        <button type="button" class="action quiet" [disabled]="busy()" (click)="decide(false)">Deny</button>
+        <button type="button" class="action primary" [disabled]="busy()" (click)="decide(true)">Allow</button>
+      </div>
+      @if (waiting() > 1) {
+        <p class="copy waiting">{{ waiting() - 1 }} more waiting.</p>
+      }
+    } @else {
     <h1>{{ title() }}</h1>
     <div class="who">
       <span class="app">{{ ask.details.site ?? appName() }}</span>
@@ -15,6 +40,11 @@
         wants to use <strong>{{ identityNick() }}</strong>
       </span>
     </div>
+    @if ((ask.times ?? 1) > 1) {
+      <p class="copy repeats" role="note">
+        Asked {{ ask.times }} times while waiting. Your answer goes to every one.
+      </p>
+    }
 
     <div class="body">
       @if (ask.method === 'sign_event') {
@@ -85,6 +115,7 @@
     </div>
     @if (waiting() > 1) {
       <p class="copy waiting">{{ waiting() - 1 }} more waiting.</p>
+    }
     }
   } @else {
     <h1>Nothing waits</h1>

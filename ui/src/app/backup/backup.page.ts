@@ -11,6 +11,7 @@ import {
 import { ConfirmService } from '../shared/confirm.service';
 import { CopyButton } from '../shared/copy-button';
 import { Dialog } from '../shared/dialog';
+import { BackupDevices } from './devices';
 import { SYNC_CONTENT_LIMIT, formatVaultSize, relaysFromText, relaysToText } from './relays';
 
 type DialogState =
@@ -27,7 +28,7 @@ const RESULT_TEXT: Record<BackupOutcome['result'], string> = {
 
 @Component({
   selector: 'app-backup-page',
-  imports: [FormsModule, CopyButton, Dialog],
+  imports: [FormsModule, CopyButton, Dialog, BackupDevices],
   host: { class: 'page' },
   templateUrl: './backup.page.html',
   styleUrl: './backup.page.scss',

@@ -341,7 +341,10 @@ async fn each_published_vault_is_later_than_the_one_it_merged() {
         .lock()
         .unwrap()
         .iter()
-        .filter(|(_, e)| e.pubkey.to_hex() == shared)
+        // Device records have the same author, under their own d tags.
+        .filter(|(_, e)| {
+            e.pubkey.to_hex() == shared && e.tags.identifier().as_deref() == Some("gooti-shared")
+        })
         .map(|(_, e)| e.created_at.as_secs())
         .collect();
     assert!(times.len() >= 3, "{times:?}");
@@ -353,7 +356,7 @@ async fn each_published_vault_is_later_than_the_one_it_merged() {
 /// A browser still backups Alice with her key; this desktop holds Alice as Desktop only and joins.
 /// Joining replaces the key with the pointer and sends it at once (and must not hang doing so).
 #[tokio::test]
-async fn joining_with_a_desktop_only_identity_sends_the_pointer_over_the_shared_key() {
+async fn joining_with_a_desktop_only_identity_sends_the_pointer() {
     let relays = MemoryRelays::default();
     let phrase = phrase();
 
@@ -417,10 +420,11 @@ async fn joining_with_a_desktop_only_identity_sends_the_pointer_over_the_shared_
         row.privkey.is_none(),
         "the relay vault no longer carries the key"
     );
+    // The pointer, without a shared browser key: browsers sign with their own.
     assert!(
         row.bunker
             .as_ref()
-            .is_some_and(|b| b.client_secret_key.is_some())
+            .is_some_and(|b| b.client_secret_key.is_none())
     );
     assert!(!serde_json::to_string(&remote).unwrap().contains(HEX));
 
@@ -489,6 +493,10 @@ impl RelayIo for RefuseDesktopRecord {
         d_tag: &str,
     ) -> gooti_core::Result<Option<Event>> {
         self.inner.fetch_newest(relays, pubkey, d_tag).await
+    }
+
+    async fn fetch_all(&self, relays: &[String], pubkey: &str) -> gooti_core::Result<Vec<Event>> {
+        self.inner.fetch_all(relays, pubkey).await
     }
 }
 
@@ -597,6 +605,8 @@ async fn a_restore_after_a_reset_brings_back_desktop_only_keys_signers_and_apps(
     let phrase = phrase();
     let before = backed_up(&relays, &phrase).await;
     let old = identities(&before);
+    allow_browser(&before, &find(&old, "Alice").pubkey);
+    before.backup_runner.back_up_now().await.unwrap();
     let alice_signer = signer_of(&before, find(&old, "Alice"));
     let bob_signer = signer_of(&before, find(&old, "Bob"));
     let pointer = shared_row(&relays, &phrase, "Alice").await;
@@ -620,7 +630,7 @@ async fn a_restore_after_a_reset_brings_back_desktop_only_keys_signers_and_apps(
     // The same signer keys, so the browsers' pointer and Coracle's link still reach it.
     assert_eq!(signer_of(&after, alice), alice_signer);
     assert_eq!(signer_of(&after, find(&restored, "Bob")), bob_signer);
-    assert_eq!(app_names(&after), ["Coracle", "Gooti browsers"]);
+    assert_eq!(app_names(&after), ["Coracle", "Work laptop"]);
     // A new desktop: it waits to be told to sign, in case the old one still runs.
     assert!(alice.served_elsewhere && find(&restored, "Bob").served_elsewhere);
     assert!(listens(&after).is_empty());
@@ -752,7 +762,7 @@ async fn two_desktops_share_the_desktop_record_and_one_answers() {
     let alice = find(&on_b, "Alice");
     assert!(alice.has_private_key && alice.custody == Custody::Desktop);
     assert!(alice.served_elsewhere);
-    assert_eq!(app_names(&b), ["Coracle", "Gooti browsers"]);
+    assert_eq!(app_names(&b), ["Coracle"]);
     assert!(listens(&b).is_empty());
     assert_eq!(listens(&a).len(), 2);
 
@@ -787,8 +797,8 @@ async fn two_desktops_share_the_desktop_record_and_one_answers() {
         .unwrap();
     a.backup_runner.back_up_now().await.unwrap();
     b.backup_runner.back_up_now().await.unwrap();
-    assert_eq!(app_names(&b), ["Gooti browsers"]);
-    assert_eq!(app_names(&a), ["Gooti browsers"]);
+    assert!(app_names(&b).is_empty());
+    assert!(app_names(&a).is_empty());
 }
 
 #[tokio::test]
@@ -838,4 +848,308 @@ async fn a_key_moved_on_one_desktop_moves_on_the_other() {
     b.backup_runner.back_up_now().await.unwrap();
     let row = shared_row(&relays, &phrase, "Robert").await;
     assert!(row["privkey"].is_string());
+}
+
+#[tokio::test]
+async fn two_desktops_list_each_other_rename_and_remove() {
+    let relays = MemoryRelays::default();
+    let a = Desktop::with_vault(&relays);
+    let phrase = gooti_core::backup::phrase::generate_passphrase().to_string();
+    a.gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .enable_backup(&phrase, &[RELAY.into()])
+        .unwrap();
+    a.backup_runner.back_up_now().await.unwrap();
+    let b = Desktop::with_vault(&relays);
+    b.backup_runner
+        .join(&phrase, &[RELAY.into()])
+        .await
+        .unwrap();
+    // Before its first backup, B lists itself with no time.
+    let listed = b.backup_runner.devices().await.unwrap().devices;
+    assert_eq!(listed.len(), 2);
+    assert!(listed[0].here && listed[0].backed_up_at.is_none());
+    assert!(listed[0].name.starts_with("Gooti Desktop on "));
+    b.backup_runner.back_up_now().await.unwrap();
+
+    let device_events = || {
+        relays
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, e)| {
+                e.tags
+                    .identifier()
+                    .is_some_and(|d| d.starts_with("gooti-device:"))
+            })
+            .count()
+    };
+    let before = device_events();
+    // A second backup within the hour sends no second device record.
+    a.backup_runner.back_up_now().await.unwrap();
+    assert_eq!(device_events(), before);
+
+    a.backup_runner
+        .rename_device("  Office   PC ")
+        .await
+        .unwrap();
+    assert_eq!(device_events(), before + 1);
+    let seen_by_b = b.backup_runner.devices().await.unwrap().devices;
+    assert_eq!(seen_by_b.len(), 2);
+    assert!(seen_by_b[0].here && seen_by_b[0].backed_up_at.is_some());
+    let a_row = seen_by_b.iter().find(|d| !d.here).unwrap();
+    assert_eq!(a_row.name, "Office PC");
+
+    assert!(matches!(
+        b.backup_runner.remove_device(&seen_by_b[0].id).await,
+        Err(Error::RemoveThisDevice)
+    ));
+    b.backup_runner.remove_device(&a_row.id).await.unwrap();
+    let after = b.backup_runner.devices().await.unwrap().devices;
+    assert_eq!(after.len(), 1);
+    assert!(after[0].here);
+
+    // A's next backup sees that it was removed and publishes again, within the hour.
+    let removed = device_events();
+    a.backup_runner.back_up_now().await.unwrap();
+    assert_eq!(device_events(), removed + 1);
+    let back = b.backup_runner.devices().await.unwrap().devices;
+    assert_eq!(back.len(), 2);
+    assert!(back.iter().any(|d| !d.here && d.name == "Office PC"));
+    // Listed again: the next backup within the hour sends nothing.
+    a.backup_runner.back_up_now().await.unwrap();
+    assert_eq!(device_events(), removed + 1);
+}
+
+#[tokio::test]
+async fn an_approved_browser_and_its_disconnect_reach_a_restored_desktop() {
+    use gooti_core::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
+    use gooti_core::bunker::message::Scheme;
+    let relays = MemoryRelays::default();
+    let phrase = phrase();
+    let before = backed_up(&relays, &phrase).await;
+    let alice = find(&identities(&before), "Alice").clone();
+    let laptop = nostr::key::Keys::generate().public_key().to_hex();
+    {
+        let mut gooti = before.gooti.lock().unwrap();
+        let vault = gooti.vault_mut();
+        vault
+            .bunker_allow_browser(&Ask {
+                key: "k".into(),
+                request_id: "r".into(),
+                connection_id: String::new(),
+                identity_pubkey: alice.pubkey.clone(),
+                client_pubkey: laptop.clone(),
+                signer_pubkey: String::new(),
+                method: BROWSER_CONNECT.into(),
+                params: Vec::new(),
+                scheme: Scheme::Nip44,
+                received_at: 0,
+                details: AskDetails {
+                    browser: Some(BrowserAsk {
+                        name: "Work laptop".into(),
+                        code: String::new(),
+                    }),
+                    ..AskDetails::default()
+                },
+            })
+            .unwrap();
+        vault
+            .bunker_set_identity_browser_trust(&alice.id, gooti_core::bunker::policy::Trust::Ask)
+            .unwrap();
+    }
+    before.backup_runner.back_up_now().await.unwrap();
+    let pointer = shared_row(&relays, &phrase, "Alice").await;
+    assert!(pointer["bunker"].get("clientSecretKey").is_none());
+
+    // Restored elsewhere: Alice's key comes back without the shared key, and so does the laptop.
+    let after = Desktop::new(&relays);
+    after
+        .backup_runner
+        .restore_new_vault("1234", &phrase, &[RELAY.into()])
+        .await
+        .unwrap();
+    let restored = find(&identities(&after), "Alice").clone();
+    assert!(restored.has_private_key && restored.custody == Custody::Desktop);
+    let browsers = |desktop: &Desktop| {
+        desktop
+            .gooti
+            .lock()
+            .unwrap()
+            .vault()
+            .bunker_browsers()
+            .unwrap()
+    };
+    let list = browsers(&after);
+    assert_eq!(list.browsers.len(), 1);
+    assert_eq!(list.browsers[0].name, "Work laptop");
+    assert!(app_names(&after).contains(&"Work laptop".to_string()));
+    // Alice's trust for browsers came along.
+    let settings = after
+        .gooti
+        .lock()
+        .unwrap()
+        .vault()
+        .bunker_identity_browsers(&restored.id)
+        .unwrap();
+    assert_eq!(settings.trust, gooti_core::bunker::policy::Trust::Ask);
+
+    // Disconnected on the first desktop: gone on the second after both back up.
+    before
+        .gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_disconnect_browser(&laptop)
+        .unwrap();
+    before.backup_runner.back_up_now().await.unwrap();
+    after.backup_runner.back_up_now().await.unwrap();
+    assert!(browsers(&after).browsers.is_empty());
+    assert!(!app_names(&after).contains(&"Work laptop".to_string()));
+}
+
+/// Allow on a browser's request, as if pressed on the desktop: a browser with its own key.
+fn allow_browser(desktop: &Desktop, identity_pubkey: &str) {
+    use gooti_core::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
+    use gooti_core::bunker::message::Scheme;
+    desktop
+        .gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_allow_browser(&Ask {
+            key: "k".into(),
+            request_id: "r".into(),
+            connection_id: String::new(),
+            identity_pubkey: identity_pubkey.to_string(),
+            client_pubkey: nostr::key::Keys::generate().public_key().to_hex(),
+            signer_pubkey: String::new(),
+            method: BROWSER_CONNECT.into(),
+            params: Vec::new(),
+            scheme: Scheme::Nip44,
+            received_at: 0,
+            details: AskDetails {
+                browser: Some(BrowserAsk {
+                    name: "Work laptop".into(),
+                    code: String::new(),
+                }),
+                ..AskDetails::default()
+            },
+        })
+        .unwrap();
+}
+
+/// Gooti Desktop 0.1.4 on the same passphrase writes the "Gooti browsers" connection of the shared
+/// key into the desktop record, and Alice's pointer with that key and no secret into the shared
+/// record. One backup here settles both, and the next one sends nothing: no back and forth.
+#[tokio::test]
+async fn what_gooti_desktop_0_1_4_writes_settles_after_one_backup() {
+    use gooti_core::backup::blob::seal_shared_document;
+    use gooti_core::backup::desktop::{open_desktop_document, put, seal_desktop_document};
+    use gooti_core::backup::event::{
+        DESKTOP_D_TAG, SHARED_D_TAG, build_backup_event, read_backup_payload,
+    };
+    use gooti_core::backup::phrase::{derive_desktop_keys, derive_shared_keys};
+    use gooti_core::bunker::policy::Trust;
+    use gooti_core::bunker::state::Connection;
+
+    let relays = MemoryRelays::default();
+    let phrase = phrase();
+    let a = backed_up(&relays, &phrase).await;
+    let alice = find(&identities(&a), "Alice").clone();
+    let newest = |d_tag: &str| {
+        relays
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, event)| event.tags.identifier().as_deref() == Some(d_tag))
+            .map(|(_, event)| event.clone())
+            .max_by_key(|event| event.created_at)
+            .unwrap()
+    };
+
+    // The desktop record as 0.1.4 sends it: with the shared key's connection.
+    let desktop_keys = derive_desktop_keys(&phrase).unwrap();
+    let event = newest(DESKTOP_D_TAG);
+    let mut record = open_desktop_document(
+        read_backup_payload(&event, DESKTOP_D_TAG).unwrap(),
+        &desktop_keys.encryption_key,
+    )
+    .unwrap();
+    let shared_client = nostr::key::Keys::generate();
+    put(
+        &mut record.connections,
+        "legacy",
+        Connection {
+            id: "legacy".into(),
+            identity_pubkey: alice.pubkey.clone(),
+            client_pubkey: shared_client.public_key().to_hex(),
+            relays: vec![RELAY.into()],
+            name: Some("Gooti browsers".into()),
+            url: None,
+            image: None,
+            perms: None,
+            created_at: 1,
+            last_used_at: None,
+            trust: Trust::Basic,
+            rules: Vec::new(),
+            browsers: true,
+        },
+        1.0,
+    );
+    let payload = seal_desktop_document(&record, &desktop_keys.encryption_key).unwrap();
+    relays.put(
+        RELAY,
+        build_backup_event(
+            &desktop_keys,
+            DESKTOP_D_TAG,
+            &payload,
+            event.created_at.as_secs() + 10,
+        ),
+    );
+
+    // The shared record as 0.1.4 sends it: the pointer carries the shared key, not the secret.
+    let shared_keys = derive_shared_keys(&phrase).unwrap();
+    let mut document =
+        gooti_core::backup::flow::fetch_shared_document(&shared_keys, &[RELAY.into()], &relays)
+            .await
+            .unwrap()
+            .unwrap();
+    let row = document
+        .identities
+        .iter_mut()
+        .find(|row| row.pubkey == alice.pubkey)
+        .unwrap();
+    let bunker = row.bunker.as_mut().unwrap();
+    bunker.client_secret_key = Some(shared_client.secret_key().to_secret_hex());
+    bunker.secret = None;
+    row.updated_at += 60_000.0;
+    let event = newest(SHARED_D_TAG);
+    let payload = seal_shared_document(&document, &shared_keys.encryption_key).unwrap();
+    relays.put(
+        RELAY,
+        build_backup_event(
+            &shared_keys,
+            SHARED_D_TAG,
+            &payload,
+            event.created_at.as_secs() + 10,
+        ),
+    );
+
+    // One backup settles it.
+    a.backup_runner.back_up_now().await.unwrap();
+    assert!(!app_names(&a).contains(&"Gooti browsers".to_string()));
+    let pointer = shared_row(&relays, &phrase, "Alice").await;
+    assert!(pointer["bunker"].get("clientSecretKey").is_none());
+    assert!(pointer["bunker"]["secret"].is_string());
+
+    // The next one sends nothing.
+    let count = relays.count();
+    let outcome = a.backup_runner.back_up_now().await.unwrap();
+    assert_eq!(outcome.result, BackupResult::Current);
+    assert_eq!(relays.count(), count);
 }

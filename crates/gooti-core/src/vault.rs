@@ -16,11 +16,15 @@ use zeroize::Zeroizing;
 
 use crate::activity::{self, ActivityEntry};
 use crate::backup::blob::shared_content_chars;
-use crate::backup::document::{SharedDocument, is_wss_url};
+use crate::backup::device::{
+    DEVICE_REFRESH_MS, DeviceApp, DeviceRecord, default_desktop_device_name, new_device_id,
+    normalize_device_name,
+};
+use crate::backup::document::{Millis, SharedDocument, is_wss_url};
 use crate::backup::phrase::{BackupKeys, derive_desktop_keys, derive_shared_keys};
 use crate::backup::state::{
-    BackupState, LiveIdentity, apply_shared_document, project_shared_document, stamp_identity,
-    tombstone_identity,
+    BackupState, LiveIdentity, LocalDevice, apply_shared_document, project_shared_document,
+    stamp_identity, tombstone_identity,
 };
 use crate::bunker::state::BunkerData;
 use crate::crypto::{self, KEY_LEN, KdfParams, SecretKeyBytes};
@@ -72,6 +76,23 @@ pub enum Applied {
 }
 
 /// Everything a backup needs from the vault, taken under the lock so the network part runs without it.
+/// This desktop's device record and where it goes.
+pub struct DevicePlan {
+    pub keys: BackupKeys,
+    pub relays: Vec<String>,
+    pub record: DeviceRecord,
+    /// When the previous record went out, in ms.
+    pub published_at: Option<Millis>,
+}
+
+/// What "Devices" reads.
+pub struct DevicesPlan {
+    pub keys: BackupKeys,
+    pub relays: Vec<String>,
+    pub this_id: String,
+    pub this_name: String,
+}
+
 pub struct SharedPlan {
     pub keys: BackupKeys,
     pub relays: Vec<String>,
@@ -342,6 +363,7 @@ impl Vault {
             custody: Custody::Shared,
             custody_at: None,
             browsers: None,
+            site: None,
             deleted_at: None,
         };
         let id = stored.id.clone();
@@ -426,6 +448,11 @@ impl Vault {
     pub fn rename_identity(&mut self, id: &str, nick: &str) -> Result<IdentitySummary> {
         let nick = identity::normalize_nick(nick)?;
         self.update(id, |identity| identity.nick = nick)
+    }
+
+    /// "Keep as a regular identity": a site-only identity leaves that group on every device.
+    pub fn keep_as_regular_identity(&mut self, id: &str) -> Result<IdentitySummary> {
+        self.update(id, |identity| identity.site = None)
     }
 
     /// `None` goes back to the color derived from the public key.
@@ -513,6 +540,84 @@ impl Vault {
     pub fn set_auto_backup(&mut self, on: bool) -> Result<()> {
         self.backup_state_mut()?.auto_backup = on;
         self.save()
+    }
+
+    /// This desktop's device record to publish after a backup: `None` when one went out less than
+    /// an hour ago, unless `force`. Makes the device id the first time.
+    pub fn device_plan(&mut self, force: bool, at: Millis) -> Result<Option<DevicePlan>> {
+        let device = self.ensure_device()?;
+        let backup = self.backup_state_mut()?;
+        let keys = BackupKeys::from_hex(&backup.signing_key_hex, &backup.encryption_key_hex)?;
+        let relays = backup.relays.clone();
+        let due = force
+            || device
+                .published_at
+                .is_none_or(|published| at - published >= DEVICE_REFRESH_MS);
+        if !due {
+            return Ok(None);
+        }
+        Ok(Some(DevicePlan {
+            keys,
+            relays,
+            published_at: device.published_at,
+            record: DeviceRecord {
+                name: device
+                    .name
+                    .clone()
+                    .unwrap_or_else(default_desktop_device_name),
+                id: device.id,
+                app: DeviceApp::Desktop,
+                backed_up_at: at,
+            },
+        }))
+    }
+
+    /// This desktop's device entry, made and saved the first time.
+    fn ensure_device(&mut self) -> Result<LocalDevice> {
+        let backup = self.backup_state_mut()?;
+        if let Some(device) = &backup.device {
+            return Ok(device.clone());
+        }
+        let device = LocalDevice {
+            id: new_device_id(),
+            name: None,
+            published_at: None,
+        };
+        backup.device = Some(device.clone());
+        self.save()?;
+        Ok(device)
+    }
+
+    /// Notes that this desktop's device record went out at `at`.
+    pub fn device_published(&mut self, id: &str, at: Millis) -> Result<()> {
+        let backup = self.backup_state_mut()?;
+        if let Some(device) = backup.device.as_mut().filter(|d| d.id == id) {
+            device.published_at = Some(at);
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// "Rename" in Devices. Publish with `device_plan(true, ..)` afterwards.
+    pub fn rename_device(&mut self, name: &str) -> Result<()> {
+        let name = normalize_device_name(name)?;
+        self.ensure_device()?;
+        if let Some(device) = self.backup_state_mut()?.device.as_mut() {
+            device.name = Some(name);
+        }
+        self.save()
+    }
+
+    /// What "Devices" needs: keys, relays and this desktop's device id.
+    pub fn devices_plan(&mut self) -> Result<DevicesPlan> {
+        let this = self.ensure_device()?;
+        let backup = self.backup_state_mut()?;
+        Ok(DevicesPlan {
+            keys: BackupKeys::from_hex(&backup.signing_key_hex, &backup.encryption_key_hex)?,
+            relays: backup.relays.clone(),
+            this_id: this.id.clone(),
+            this_name: this.name.unwrap_or_else(default_desktop_device_name),
+        })
     }
 
     pub fn auto_backup(&self) -> bool {
@@ -632,7 +737,7 @@ impl Vault {
     }
 
     /// Saves a change that a running backup must not overwrite.
-    fn save_change(&mut self) -> Result<()> {
+    pub(crate) fn save_change(&mut self) -> Result<()> {
         self.unlocked_mut()?.revision += 1;
         self.save()
     }
@@ -677,6 +782,10 @@ impl Vault {
         }
         // Before 2026-11-12, apps from a `bunker://` link kept no relays of their own.
         let pinned = data.bunker.pin_app_relays();
+        // Gooti 2.0 browsers' shared key, retired: browsers sign with their own key.
+        let pinned = data.bunker.retire_shared_key() || pinned;
+        // Blocked browsers are kept for 90 days.
+        let pinned = data.bunker.tidy_blocked_browsers(time::now_ms()) || pinned;
         self.unlocked = Some(Unlocked {
             data_key,
             data,
@@ -847,14 +956,17 @@ fn apply_merged(unlocked: &mut Unlocked) -> Applied {
                             if signers
                                 .contains(&(pointer.pubkey.clone(), stored.pubkey.clone())) =>
                         {
-                            if let Some(client) = pointer.client_secret_key.clone() {
-                                stored.custody = Custody::Desktop;
-                                stored.browsers = Some(BrowserLink {
-                                    client_secret_hex: client,
-                                    ask_site: pointer.ask_site,
-                                    signer_pubkey: Some(pointer.pubkey.clone()),
-                                });
-                            }
+                            // An older Gooti put the shared browser key in the pointer;
+                            // it is retired, so the link gets a fresh one nobody uses.
+                            let client = pointer.client_secret_key.clone().unwrap_or_else(|| {
+                                nostr::key::Keys::generate().secret_key().to_secret_hex()
+                            });
+                            stored.custody = Custody::Desktop;
+                            stored.browsers = Some(BrowserLink {
+                                client_secret_hex: client,
+                                ask_site: pointer.ask_site,
+                                signer_pubkey: Some(pointer.pubkey.clone()),
+                            });
                         }
                         None if winning_has_key => {
                             stored.custody = Custody::Shared;
@@ -957,6 +1069,7 @@ fn new_backup_state(
         relays,
         document,
         auto_backup: false,
+        device: None,
     }
 }
 

@@ -35,21 +35,14 @@ use serde::Serialize;
 /// Version of this build, shown in the app.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Release channel. Alpha until the first stable release.
-pub const CHANNEL: &str = "alpha";
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
     pub version: &'static str,
-    pub channel: &'static str,
 }
 
 pub fn app_info() -> AppInfo {
-    AppInfo {
-        version: VERSION,
-        channel: CHANNEL,
-    }
+    AppInfo { version: VERSION }
 }
 
 #[cfg(test)]
@@ -60,13 +53,11 @@ mod tests {
     fn app_info_reports_this_build() {
         let info = app_info();
         assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(info.channel, "alpha");
     }
 
     #[test]
     fn app_info_serializes_in_camel_case_for_the_ui() {
         let json = serde_json::to_value(app_info()).unwrap();
-        assert_eq!(json["channel"], "alpha");
-        assert_eq!(json["version"], VERSION);
+        assert_eq!(json, serde_json::json!({ "version": VERSION }));
     }
 }

@@ -52,12 +52,41 @@ describe('ConnectionsPage', () => {
     expect(text(root)).toContain('No app yet');
   });
 
-  it('offers no Remove for the browsers of a Desktop only identity', async () => {
-    core.bunker.connections = [{ ...CONNECTION, name: 'Gooti browsers', browsers: true, trust: 'basic' }];
+  it('lists the browsers apart from the apps, with no Remove for them', async () => {
+    core.bunker.connections = [{ ...CONNECTION, name: 'Work laptop', browsers: true, trust: 'basic' }];
+    core.browserList = { browsers: [] };
     const { root } = await render();
-    expect(text(root)).toContain('Gooti browsers');
-    expect(text(root)).toContain('Basic');
+    expect(text(root)).toContain('No app yet');
+    expect(text(root)).toContain('No browser yet');
     expect(Array.from(root.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Remove')).toBe(false);
+  });
+
+  it('disconnects a browser after the confirmation', async () => {
+    const laptop = {
+      clientPubkey: 'ab'.repeat(32),
+      name: 'Work laptop',
+      code: 'K7F-2QX',
+      approvedAt: 1_700_000_000_000,
+      lastUsedAt: null,
+    };
+    core.browserList = { browsers: [laptop] };
+    const { fixture, root } = await render();
+    expect(text(root)).toContain('Work laptop');
+    expect(text(root)).toContain('K7F-2QX');
+
+    // Trust is set per identity, on its page, not per browser.
+    expect(root.querySelector('app-select')).toBeNull();
+
+    const confirm = TestBed.inject(ConfirmService);
+    const disconnect = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter((b) => b.textContent?.trim() === 'Disconnect');
+    disconnect()[0].click();
+    expect(confirm.pending()?.message).toBe('Disconnect Work laptop? It can no longer sign through this desktop.');
+    confirm.answer(true);
+    await settle(fixture);
+    expect(core.bunkerBrowserDisconnect).toHaveBeenCalledWith(laptop.clientPubkey);
+    expect(text(root)).not.toContain('Work laptop');
+    expect(text(root)).toContain('No browser yet');
   });
 
   it('pauses all apps and shows each relay state', async () => {
@@ -247,6 +276,27 @@ describe('ApprovalPanel', () => {
     expect(text(root)).toContain('Nothing waits');
   });
 
+  it('asks to allow a browser by its name and code, without remembering', async () => {
+    core.pendingAsks.set([
+      {
+        ...ASK,
+        method: 'connect',
+        connectionId: '',
+        receivedAt: Date.now(),
+        details: { ...ASK.details, kind: null, content: null, browser: { name: 'Work laptop', code: 'K7F-2QX' } },
+      },
+    ]);
+    const { fixture, root } = await render();
+    expect(text(root)).toContain('Allow this browser?');
+    expect(text(root)).toContain('Work laptop');
+    expect(text(root)).toContain('K7F-2QX');
+    expect(text(root)).toContain('Asked just now');
+    expect(root.querySelector('#remember')).toBeNull();
+    button(root, 'Allow').click();
+    await settle(fixture);
+    expect(core.bunkerDecide).toHaveBeenCalledWith('k1', true, 'once');
+  });
+
   it('approves with Ctrl+Enter and rejects with Ctrl+Shift+Enter', async () => {
     core.pendingAsks.set([ASK, { ...ASK, key: 'k2' }]);
     const { fixture } = await render();
@@ -290,6 +340,16 @@ describe('ApprovalPanel', () => {
     const { root } = await render();
     expect(root.querySelector('.who .app')?.textContent?.trim()).toBe('primal.net');
     expect(text(root)).toContain('through');
+  });
+
+  it('says when the app asked the same again, and answers it once for all', async () => {
+    core.pendingAsks.set([{ ...ASK, times: 3, details: { ...ASK.details, site: 'primal.net' } }]);
+    const { fixture, root } = await render();
+    expect(text(root)).toContain('Asked 3 times while waiting. Your answer goes to every one.');
+    expect(text(root)).not.toContain('more waiting');
+    button(root, 'Approve').click();
+    await settle(fixture);
+    expect(core.bunkerDecide).toHaveBeenCalledTimes(1);
   });
 
   it('names a decryption and the other party', async () => {

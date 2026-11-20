@@ -224,6 +224,30 @@ pub(super) fn project(
             changed |= bury(&mut document.connections, id, now);
         }
     }
+    for browser in &data.bunker.browsers {
+        changed |= put(
+            &mut document.browsers,
+            &browser.client_pubkey,
+            browser.clone(),
+            now,
+        );
+    }
+    // A block older than 90 days is forgotten on every desktop: the same date everywhere.
+    let expired: Vec<String> = document
+        .browsers
+        .iter()
+        .filter(|(_, row)| row.live().is_some_and(|b| b.block_expired(now as i64)))
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in expired {
+        changed |= bury(&mut document.browsers, &key, now);
+    }
+    for (identity, relays) in &data.bunker.browser_relays {
+        changed |= put(&mut document.browser_relays, identity, relays.clone(), now);
+    }
+    for (identity, trust) in &data.bunker.browser_trust {
+        changed |= put(&mut document.browser_trust, identity, *trust, now);
+    }
     if let Some(at) = data.bunker.relays_at
         && document
             .bunker_relays
@@ -299,9 +323,12 @@ pub(super) fn hydrate(unlocked: &mut Unlocked, full: bool) {
         let Some(privkey) = document.keys.get(&identity.pubkey).and_then(Row::live) else {
             continue;
         };
-        let Some(client) = pointer.client_secret_key.clone() else {
-            continue;
-        };
+        // Pointers from an older Gooti carry the shared browser key; it is retired. The link here
+        // gets a fresh one that nobody uses.
+        let client = pointer
+            .client_secret_key
+            .clone()
+            .unwrap_or_else(|| nostr::key::Keys::generate().secret_key().to_secret_hex());
         let matches =
             keys_from_hex(privkey).is_ok_and(|k| k.public_key().to_hex() == identity.pubkey);
         if signer.identity_pubkey != identity.pubkey || !matches {
@@ -316,6 +343,57 @@ pub(super) fn hydrate(unlocked: &mut Unlocked, full: bool) {
         identity.bunker = None;
         identity.custody = Custody::Desktop;
     }
+
+    for (client, row) in &document.browsers {
+        let Some(browser) = row.live() else {
+            continue;
+        };
+        match data
+            .bunker
+            .browsers
+            .iter_mut()
+            .find(|b| b.client_pubkey == *client)
+        {
+            Some(local) if full => *local = browser.clone(),
+            // A block from another desktop always holds.
+            Some(local) if browser.blocked => local.blocked = true,
+            Some(_) => {}
+            None => data.bunker.browsers.push(browser.clone()),
+        }
+    }
+    for (identity, row) in &document.browser_relays {
+        let Some(relays) = row.live() else {
+            continue;
+        };
+        match data.bunker.browser_relays.get_mut(identity) {
+            Some(local) if full => *local = relays.clone(),
+            Some(_) => {}
+            None => {
+                data.bunker
+                    .browser_relays
+                    .insert(identity.clone(), relays.clone());
+            }
+        }
+    }
+    for (identity, row) in &document.browser_trust {
+        let Some(trust) = row.live() else {
+            continue;
+        };
+        match data.bunker.browser_trust.get_mut(identity) {
+            Some(local) if full => *local = *trust,
+            Some(_) => {}
+            None => {
+                data.bunker.browser_trust.insert(identity.clone(), *trust);
+            }
+        }
+    }
+    let blocked: Vec<String> = data
+        .bunker
+        .browsers
+        .iter()
+        .filter(|b| b.blocked)
+        .map(|b| b.client_pubkey.clone())
+        .collect();
 
     let holds: Vec<String> = data
         .identities
@@ -350,10 +428,16 @@ pub(super) fn hydrate(unlocked: &mut Unlocked, full: bool) {
         }
     }
 
+    // A blocked browser's connections go, whatever the record says.
+    bunker
+        .connections
+        .retain(|c| !blocked.contains(&c.client_pubkey));
     for (id, row) in &document.connections {
         match row.live() {
             Some(connection)
-                if holds.contains(&connection.identity_pubkey) && !bunker.removed.contains(id) =>
+                if holds.contains(&connection.identity_pubkey)
+                    && !bunker.removed.contains(id)
+                    && !blocked.contains(&connection.client_pubkey) =>
             {
                 if let Some(local) = bunker.connections.iter_mut().find(|c| c.id == *id) {
                     if full {
@@ -383,6 +467,9 @@ pub(super) fn hydrate(unlocked: &mut Unlocked, full: bool) {
             _ => {}
         }
     }
+    // An older Gooti Desktop may still send the shared browser key's connections.
+    bunker.retire_shared_key();
+    bunker.tidy_blocked_browsers(crate::time::now_ms());
 }
 
 /// Stamps a Desktop only identity whose pointer here differs from the shared row, so the
@@ -407,7 +494,14 @@ pub(super) fn restamp_pointers(unlocked: &mut Unlocked) -> bool {
                 .iter()
                 .find(|row| row.pubkey == i.pubkey && row.deleted_at.is_none())
                 .and_then(|row| row.bunker.as_ref())
-                .is_some_and(|theirs| theirs.pubkey != ours.pubkey || theirs.relays != ours.relays)
+                // Also the browser secret, and a shared browser key that an older Gooti Desktop
+                // (0.1.4) still puts back: browsers need this desktop's pointer to connect.
+                .is_some_and(|theirs| {
+                    theirs.pubkey != ours.pubkey
+                        || theirs.relays != ours.relays
+                        || theirs.secret != ours.secret
+                        || theirs.client_secret_key != ours.client_secret_key
+                })
         })
         .map(|(index, _)| index)
         .collect();

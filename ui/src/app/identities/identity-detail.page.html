@@ -14,6 +14,18 @@
       <p class="sam-error" role="alert">{{ error() }}</p>
     }
 
+    @if (identity.site) {
+      <section class="sam-card site-card" role="note">
+        <p class="copy">
+          Site-only identity for <strong>{{ identity.site }}</strong>, made in a browser. Delete it when you are
+          done, or keep it.
+        </p>
+        <button type="button" class="action quiet" data-action="keep-regular" [disabled]="busy()" (click)="keepRegular()">
+          Keep as a regular identity
+        </button>
+      </section>
+    }
+
     <section class="group">
       <p class="kicker">Nick</p>
       <form class="inline" (submit)="$event.preventDefault(); saveNick()">
@@ -145,6 +157,73 @@
           }
         }
       </section>
+
+      @if (identity.custody === 'desktop' && browsers(); as settings) {
+        <section class="group" aria-label="Browsers">
+          <p class="kicker">Browsers</p>
+          <p class="copy">
+            How far your browsers may go as {{ identity.nick }} without asking. The same for every browser;
+            Connections → Browsers lists them.
+          </p>
+          @for (choice of trustChoices; track choice.value) {
+            <label class="choice-row">
+              <input
+                type="radio"
+                name="browserTrust"
+                [value]="choice.value"
+                [checked]="settings.trust === choice.value"
+                [disabled]="busy()"
+                (change)="setBrowserTrust(choice.value)"
+              />
+              <span class="choice-text">
+                <span class="choice-label">{{ choice.label }}</span>
+                <span class="copy">{{ choice.copy }}</span>
+              </span>
+            </label>
+          }
+          @if (settings.trust === 'ask') {
+            <p class="copy slow-sites" role="note">
+              <i class="bi bi-exclamation-triangle"></i>
+              Some sites, such as Primal, give up after about 8 seconds. Approve quickly there, or choose Basic.
+            </p>
+          }
+          <p class="field-label">Remembered</p>
+          @for (rule of settings.rules; track rule.connectionId + rule.method + (rule.kind ?? '')) {
+            <div class="sam-card rule-row">
+              <div class="rule-text">
+                <span class="rule-name">{{ ruleLabel(rule) }}</span>
+                <span class="copy">
+                  {{ rule.browser }} · {{ rule.policy === 'allow' ? 'Approve' : 'Reject' }} · {{ ruleUntil(rule) }}
+                </span>
+              </div>
+              <button type="button" class="action quiet" [disabled]="busy()" (click)="forgetRule(rule)">Forget</button>
+            </div>
+          } @empty {
+            <p class="copy">Nothing yet. Choices you remember in the request window appear here.</p>
+          }
+          <label class="field-label" for="identityBrowserRelays">Relays for your browsers</label>
+          <p class="copy">
+            Your browsers reach this desktop through these relays. Backup takes a change to them. One relay per
+            line.
+          </p>
+          <textarea
+            id="identityBrowserRelays"
+            class="sam-box"
+            rows="3"
+            name="identityBrowserRelays"
+            [ngModel]="browserRelaysText()"
+            (ngModelChange)="browserRelaysText.set($event)"
+          ></textarea>
+          <div class="relay-actions">
+            <button type="button" class="action quiet" [disabled]="busy()" (click)="saveBrowserRelays()">
+              Save relays
+            </button>
+            @if (relaysNotice()) {
+              <span class="notice" role="status">{{ relaysNotice() }}</span>
+            }
+          </div>
+        </section>
+      }
 
       <section class="group">
         <p class="kicker">Export</p>

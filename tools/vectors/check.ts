@@ -7,6 +7,7 @@ import { assertSharedDocument } from '@ext/backup/document';
 import { readBackupPayload } from '@ext/backup/event';
 import { deriveSharedKeys } from '@ext/backup/phrase';
 import { canonicalSharedDocument } from '@ext/backup/state';
+import { openDeviceRecord, readDeviceEvent } from '@ext/backup/device';
 
 interface RustOutput {
   phrase: string;
@@ -38,6 +39,26 @@ async function main() {
     throw new Error('the opened document differs from what Rust sealed');
   }
   console.log(`OK: the extension opened the Rust vault event ${rust.event.id.slice(0, 12)}… with ${opened.identities.length} identities.`);
+
+  // Device records Rust sealed, next to rust.json.
+  const devicesFile = file.replace(/rust\.json$/, 'rust-devices.json');
+  const rustDevices = JSON.parse(readFileSync(devicesFile, 'utf8')) as {
+    phrase: string;
+    devices: { record: Record<string, unknown>; event: Event }[];
+  };
+  const deviceKeys = await deriveSharedKeys(rustDevices.phrase);
+  for (const { record, event } of rustDevices.devices) {
+    const read = readDeviceEvent(event, deviceKeys.pubkey);
+    if (!read || read.id !== record['id']) {
+      throw new Error(`the extension did not accept the Rust device event for ${String(record['id'])}`);
+    }
+    const opened = await openDeviceRecord(read.payload, deviceKeys.encryptionKey);
+    const sorted = (value: unknown) => JSON.stringify(value, Object.keys(value ?? {}).sort());
+    if (sorted(opened) !== sorted(record)) {
+      throw new Error(`device record differs: ${JSON.stringify(opened)} vs ${JSON.stringify(record)}`);
+    }
+  }
+  console.log(`OK: the extension opened ${rustDevices.devices.length} Rust device records.`);
 }
 
 void main().catch((error) => {

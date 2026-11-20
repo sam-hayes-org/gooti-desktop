@@ -34,6 +34,25 @@ pub trait RelayIo: Send + Sync {
         pubkey: &str,
         d_tag: &str,
     ) -> impl Future<Output = Result<Option<Event>>> + Send;
+    /// `fetch_newest`, and in the same request every event with `also_d`. The second is `None`
+    /// when this way to reach relays cannot do that; the caller then does without.
+    fn fetch_newest_also(
+        &self,
+        relays: &[String],
+        pubkey: &str,
+        d_tag: &str,
+        also_d: &str,
+    ) -> impl Future<Output = Result<(Option<Event>, Option<Vec<Event>>)>> + Send {
+        let _ = also_d;
+        async move { Ok((self.fetch_newest(relays, pubkey, d_tag).await?, None)) }
+    }
+    /// Every kind 30078 event of `pubkey` (device records, and the shared record, which callers
+    /// skip). A relay that cannot be reached is left out; all of them failing is an error.
+    fn fetch_all(
+        &self,
+        relays: &[String],
+        pubkey: &str,
+    ) -> impl Future<Output = Result<Vec<Event>>> + Send;
 }
 
 /// Opens a fresh connection per call and closes it after, like the extension.
@@ -45,6 +64,64 @@ pub struct WebSocketRelays {
 impl WebSocketRelays {
     fn wait(&self) -> Duration {
         self.wait.unwrap_or(MAX_WAIT)
+    }
+
+    /// The newest event with `d_tag`, and every event with `also_d`, in one request per relay.
+    async fn newest_and(
+        &self,
+        relays: &[String],
+        pubkey: &str,
+        d_tag: &str,
+        also_d: Option<&str>,
+    ) -> Result<(Option<Event>, Vec<Event>)> {
+        let wait = self.wait();
+        let tags: Vec<&str> = std::iter::once(d_tag).chain(also_d).collect();
+        let filter = json!({ "kinds": [BACKUP_KIND], "authors": [pubkey], "#d": tags });
+        let results = join_all(relays.iter().map(|url| fetch_one(url, &filter, wait))).await;
+        let mut reached = Vec::new();
+        let mut failures = Vec::new();
+        for (url, result) in relays.iter().zip(results) {
+            match result {
+                Ok(events) => reached.push(events),
+                Err(reason) => failures.push(RelayFailure {
+                    url: url.clone(),
+                    reason,
+                }),
+            }
+        }
+        if reached.is_empty() {
+            return Err(Error::Relays {
+                message: "No relay could be reached.".into(),
+                failures,
+            });
+        }
+        let (main, also): (Vec<Event>, Vec<Event>) = reached
+            .into_iter()
+            .flatten()
+            .partition(|event| event.tags.identifier().as_deref() == Some(d_tag));
+        let also = match also_d {
+            Some(also_d) => also
+                .into_iter()
+                .filter(|event| event.tags.identifier().as_deref() == Some(also_d))
+                .collect(),
+            None => Vec::new(),
+        };
+        let newest = main.into_iter().reduce(|newest, event| {
+            if event.created_at > newest.created_at {
+                event
+            } else {
+                newest
+            }
+        });
+        // A relay that did not answer may hold the backup. Only when every relay answered is there
+        // none, and only then may the caller publish this desktop's vault as the first.
+        if newest.is_none() && !failures.is_empty() {
+            return Err(Error::Relays {
+                message: "A relay could not be reached, and the others have no backup.".into(),
+                failures,
+            });
+        }
+        Ok((newest, also))
     }
 }
 
@@ -78,42 +155,47 @@ impl RelayIo for WebSocketRelays {
         pubkey: &str,
         d_tag: &str,
     ) -> Result<Option<Event>> {
+        Ok(self.newest_and(relays, pubkey, d_tag, None).await?.0)
+    }
+
+    async fn fetch_newest_also(
+        &self,
+        relays: &[String],
+        pubkey: &str,
+        d_tag: &str,
+        also_d: &str,
+    ) -> Result<(Option<Event>, Option<Vec<Event>>)> {
+        let (newest, also) = self.newest_and(relays, pubkey, d_tag, Some(also_d)).await?;
+        Ok((newest, Some(also)))
+    }
+
+    async fn fetch_all(&self, relays: &[String], pubkey: &str) -> Result<Vec<Event>> {
         let wait = self.wait();
-        let filter = json!({ "kinds": [BACKUP_KIND], "authors": [pubkey], "#d": [d_tag] });
+        // Relays cannot filter a d tag by prefix.
+        let filter = json!({ "kinds": [BACKUP_KIND], "authors": [pubkey] });
         let results = join_all(relays.iter().map(|url| fetch_one(url, &filter, wait))).await;
-        let mut reached = Vec::new();
+        let mut events = Vec::new();
         let mut failures = Vec::new();
+        let mut reached = false;
         for (url, result) in relays.iter().zip(results) {
             match result {
-                Ok(events) => reached.push(events),
+                Ok(found) => {
+                    reached = true;
+                    events.extend(found);
+                }
                 Err(reason) => failures.push(RelayFailure {
                     url: url.clone(),
                     reason,
                 }),
             }
         }
-        if reached.is_empty() {
+        if !reached {
             return Err(Error::Relays {
                 message: "No relay could be reached.".into(),
                 failures,
             });
         }
-        let newest = reached.into_iter().flatten().reduce(|newest, event| {
-            if event.created_at > newest.created_at {
-                event
-            } else {
-                newest
-            }
-        });
-        // A relay that did not answer may hold the backup. Only when every relay answered is there
-        // none, and only then may the caller publish this desktop's vault as the first.
-        if newest.is_none() && !failures.is_empty() {
-            return Err(Error::Relays {
-                message: "A relay could not be reached, and the others have no backup.".into(),
-                failures,
-            });
-        }
-        Ok(newest)
+        Ok(events)
     }
 }
 

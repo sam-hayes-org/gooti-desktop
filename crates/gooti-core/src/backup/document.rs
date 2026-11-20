@@ -73,6 +73,10 @@ pub struct SharedIdentity {
         with = "js_number_opt"
     )]
     pub custody_at: Option<Millis>,
+    /// A site-only identity: made in a browser with "New site-only identity", for this host. Shown
+    /// apart from the regular identities; "Keep as a regular identity" removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -249,6 +253,12 @@ fn valid_identity(value: &Value) -> bool {
     if !optional_time(row.get("deletedAt")) {
         return false;
     }
+    if row
+        .get("site")
+        .is_some_and(|site| !site.as_str().is_some_and(is_host))
+    {
+        return false;
+    }
     let privkey = row.get("privkey");
     let bunker = row.get("bunker");
     // A live row has a key or a bunker pointer, not both. A tombstone (`deletedAt`) may have neither:
@@ -327,13 +337,16 @@ fn valid_site(value: &Value) -> bool {
     let Some(row) = value.as_object() else {
         return false;
     };
-    let host_ok = row.get("host").and_then(Value::as_str).is_some_and(|host| {
-        !host.is_empty() && !host.chars().any(char::is_whitespace) && !host.contains('/')
-    });
+    let host_ok = row.get("host").and_then(Value::as_str).is_some_and(is_host);
     host_ok
         && is_key(row.get("identityPubkey"))
         && is_time(row.get("updatedAt"))
         && optional_time(row.get("deletedAt"))
+}
+
+/// `location.host`: a hostname, or a hostname and port. Same rule as the extension's `isHost`.
+pub fn is_host(text: &str) -> bool {
+    !text.is_empty() && !text.chars().any(char::is_whitespace) && !text.contains('/')
 }
 
 fn is_key(value: Option<&Value>) -> bool {

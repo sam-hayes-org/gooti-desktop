@@ -1,7 +1,7 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { BunkerAsk, CoreService, Trust, errorMessage } from '../core/core.service';
+import { BrowserList, BunkerAsk, CoreService, Trust, errorMessage } from '../core/core.service';
 import { ConfirmService } from '../shared/confirm.service';
 import { methodLabel } from './kinds';
 
@@ -27,6 +27,35 @@ export class ConnectionsPage implements OnInit {
   protected readonly busy = signal(false);
   protected readonly error = signal('');
   protected readonly notice = signal('');
+  /** "Browsers": each browser with its own key. */
+  protected readonly browsers = signal<BrowserList | null>(null);
+  /** Apps, without the browsers: those have their own section. */
+  protected readonly apps = computed(() => (this.info()?.connections ?? []).filter((c) => !c.browsers));
+  constructor() {
+    effect(() => {
+      // A browser that was allowed elsewhere, or a backup, changes the connections: read again.
+      if (this.info()) {
+        untracked(() => void this.#loadBrowsers());
+      }
+    });
+  }
+
+  async #loadBrowsers(): Promise<void> {
+    this.browsers.set(await this.core.bunkerBrowsers().catch(() => null));
+  }
+
+  async disconnectBrowser(name: string, clientPubkey: string): Promise<void> {
+    const yes = await this.#confirm.ask(`Disconnect ${name}? It can no longer sign through this desktop.`, {
+      yesLabel: 'Disconnect',
+      danger: true,
+    });
+    if (!yes) {
+      return;
+    }
+    await this.#run(async () => {
+      this.browsers.set(await this.core.bunkerBrowserDisconnect(clientPubkey));
+    });
+  }
 
   async ngOnInit(): Promise<void> {
     // "Connect new app" comes back here with a note once the app connected.
@@ -81,6 +110,9 @@ export class ConnectionsPage implements OnInit {
   protected readonly trustLabel: Record<Trust, string> = TRUST_LABELS;
 
   protected askLabel(ask: BunkerAsk): string {
+    if (ask.method === 'connect') {
+      return `${ask.details.browser?.name ?? 'A browser'} wants to sign through this desktop`;
+    }
     const app = this.info()?.connections.find((c) => c.id === ask.connectionId);
     return `${app ? this.appName(app) : 'An app'}: ${methodLabel(ask.method, ask.details.kind)}`;
   }

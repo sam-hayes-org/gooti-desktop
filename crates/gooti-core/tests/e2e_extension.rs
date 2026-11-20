@@ -15,6 +15,36 @@ use gooti_core::backup::relay::WebSocketRelays;
 use gooti_core::backup::state::{LiveIdentity, project_shared_document};
 use serde_json::Value;
 
+/// Allow on a browser's request to connect, as if pressed on the desktop: its own key, approved
+/// for this identity. Browsers no longer get a shared key from backup.
+fn allow_browser(vault: &mut gooti_core::Vault, identity_pubkey: &str) -> nostr::key::Keys {
+    use gooti_core::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
+    use gooti_core::bunker::message::Scheme;
+    let browser = nostr::key::Keys::generate();
+    vault
+        .bunker_allow_browser(&Ask {
+            key: "k".into(),
+            request_id: "r".into(),
+            connection_id: String::new(),
+            identity_pubkey: identity_pubkey.to_string(),
+            client_pubkey: browser.public_key().to_hex(),
+            signer_pubkey: String::new(),
+            method: BROWSER_CONNECT.into(),
+            params: Vec::new(),
+            scheme: Scheme::Nip44,
+            received_at: 0,
+            details: AskDetails {
+                browser: Some(BrowserAsk {
+                    name: "Work laptop".into(),
+                    code: String::new(),
+                }),
+                ..AskDetails::default()
+            },
+        })
+        .unwrap();
+    browser
+}
+
 fn extension(mode: &str, relay: &str, phrase: &str) -> Value {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new(root.join("tools/vectors/run.sh"))
@@ -62,6 +92,7 @@ async fn the_extension_and_the_desktop_sync_through_one_relay() {
         color: None,
         bunker: None,
         custody_at: None,
+        site: None,
     };
     let (local, _) = project_shared_document(
         &merge_shared_documents(&Default::default(), &remote),
@@ -105,9 +136,11 @@ async fn the_extension_signs_through_the_desktop_bunker() {
         .vault_mut()
         .add_identity("Alice", NewKey::Generate)
         .unwrap();
+    // The extension takes only wss:// relays from a link; the tool's pool sends this one to the
+    // local test relay. The bunker listens on both.
     gooti
         .vault_mut()
-        .bunker_set_relays(std::slice::from_ref(&relay))
+        .bunker_set_relays(&["wss://relay.invalid".into(), relay.clone()])
         .unwrap();
     let link = gooti.vault_mut().bunker_link(&alice.id).unwrap();
     let gooti = Arc::new(Mutex::new(gooti));
@@ -138,7 +171,7 @@ async fn the_extension_signs_through_the_desktop_bunker() {
     let result = tokio::task::spawn_blocking(move || {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let output = Command::new(root.join("tools/vectors/run.sh"))
-            .args(["bunker", &link])
+            .args(["bunker", &link, &relay])
             .output()
             .expect("node and the extension checkout are needed");
         assert!(
@@ -168,11 +201,11 @@ async fn the_extension_signs_through_the_desktop_bunker() {
 }
 
 /// Desktop only: a fresh browser applies the desktop's vault with the extension's own code,
-/// gets a bunker identity without the key, and signs through the desktop with the shared
-/// session key, without a link and without a prompt (the browsers' connection is Basic).
+/// gets a bunker identity without the key and without a shared session key, and, once allowed,
+/// signs through the desktop with its own key, without a prompt (a browser's trust is Basic).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-async fn a_browser_signs_through_the_desktop_with_the_shared_pointer() {
+async fn a_browser_signs_through_the_desktop_with_the_pointer() {
     use std::sync::{Arc, Mutex};
 
     use gooti_core::backup::blob::seal_shared_document;
@@ -207,6 +240,7 @@ async fn a_browser_signs_through_the_desktop_with_the_shared_pointer() {
             Custody::Desktop,
         )
         .unwrap();
+    let browser = allow_browser(vault, &alice.pubkey);
     let document = vault.shared_plan().unwrap().document;
     let keys = derive_shared_keys(&phrase).unwrap();
     let payload = seal_shared_document(&document, &keys.encryption_key).unwrap();
@@ -223,6 +257,7 @@ async fn a_browser_signs_through_the_desktop_with_the_shared_pointer() {
             "encryptionKeyHex": keys.encryption_hex().as_str(),
             "relay": relay,
             "privkey": privkey,
+            "browserKey": browser.secret_key().to_secret_hex(),
         })
         .to_string(),
     )
@@ -312,6 +347,8 @@ async fn a_browser_signs_through_a_desktop_restored_after_a_reset() {
             )
             .unwrap()
     };
+    // A browser allowed before the reset; the desktop record brings it back.
+    let browser = allow_browser(before.lock().unwrap().vault_mut(), &alice.pubkey);
     BackupRunner::new(Arc::clone(&before), backup.clone())
         .back_up_now()
         .await
@@ -324,7 +361,11 @@ async fn a_browser_signs_through_a_desktop_restored_after_a_reset() {
         .unwrap()
         .iter()
         .rev()
-        .find(|(_, event)| event.pubkey == keys.signing.public_key())
+        .find(|(_, event)| {
+            // The device record has the same author, under its own d tag.
+            event.pubkey == keys.signing.public_key()
+                && event.tags.identifier().as_deref() == Some("gooti-shared")
+        })
         .map(|(_, event)| event.content.clone())
         .unwrap();
     drop(before);
@@ -363,6 +404,7 @@ async fn a_browser_signs_through_a_desktop_restored_after_a_reset() {
             "encryptionKeyHex": keys.encryption_hex().as_str(),
             "relay": relay,
             "privkey": privkey,
+            "browserKey": browser.secret_key().to_secret_hex(),
         })
         .to_string(),
     )
@@ -387,5 +429,151 @@ async fn a_browser_signs_through_a_desktop_restored_after_a_reset() {
     assert_eq!(result["hasPrivkey"], false);
     assert_eq!(result["signedBy"], alice.pubkey);
     assert_eq!(result["valid"], true);
+    service.stop();
+}
+
+/// A browser with its own key (`docs/DESIGN-browser-keys.md`): it asks, the desktop allows it,
+/// it signs; after Disconnect, its next request is told so. The extension's own code, both codes.
+/// Run on request: `cargo test -p gooti-core --test e2e_extension -- --ignored`
+#[tokio::test]
+#[ignore]
+async fn a_browser_with_its_own_key_is_allowed_signs_and_is_disconnected() {
+    use std::sync::{Arc, Mutex};
+
+    use gooti_core::bunker::service::{BunkerService, Notice};
+    use gooti_core::bunker::state::browser_code;
+    use gooti_core::{Custody, Gooti, KdfParams, MemoryKeychain, NewKey};
+
+    let (relay, _) = start_relay(Mode::Normal).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut gooti = Gooti::open_with_kdf(
+        dir.path(),
+        Box::new(MemoryKeychain::default()),
+        KdfParams::TEST,
+    );
+    let vault = gooti.vault_mut();
+    vault.create("1234").unwrap();
+    // Browsers need a wss:// relay; the bunker also listens on the local test relay.
+    vault
+        .bunker_set_relays(&["wss://relay.invalid".into(), relay.clone()])
+        .unwrap();
+    let privkey = "31".repeat(32);
+    let alice = vault
+        .add_identity_as(
+            "Alice",
+            NewKey::Import {
+                key: &privkey,
+                password: None,
+            },
+            Custody::Desktop,
+        )
+        .unwrap();
+    // What the pointer in the backup carries; a browser sends it with `connect`.
+    let secret = gooti_core::bunker::state::browser_secret(&privkey);
+    let signer = vault
+        .bunker_signer(&alice.pubkey)
+        .unwrap()
+        .unwrap()
+        .public_key()
+        .to_hex();
+    let gooti = Arc::new(Mutex::new(gooti));
+
+    let (tx, mut asks) = tokio::sync::mpsc::unbounded_channel();
+    let service = BunkerService::start(
+        Arc::clone(&gooti),
+        Arc::new(move |notice| {
+            if let Notice::Asked { ask } = notice {
+                let _ = tx.send(ask);
+            }
+        }),
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let browser_key = nostr::key::Keys::generate();
+    let browser_pubkey = browser_key.public_key().to_hex();
+    let run = |step: &str, secret: &str| {
+        let input = dir
+            .path()
+            .join(format!("browserkey-{step}-{}.json", secret.len()));
+        std::fs::write(
+            &input,
+            serde_json::json!({
+                "browserKey": browser_key.secret_key().to_secret_hex(),
+                "signer": signer,
+                "secret": secret,
+                "relay": relay,
+                "name": "Work laptop",
+                "step": step,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        tokio::task::spawn_blocking(move || {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let output = Command::new(root.join("tools/vectors/run.sh"))
+                .args(["browserkey", input.to_str().unwrap()])
+                .output()
+                .expect("node and the extension checkout are needed");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        })
+    };
+
+    // The browser asks; the desktop shows its name and the same code, and Allow is pressed.
+    // Without the secret from the backup (a stranger who saw the signer key): refused, and the
+    // desktop asks nothing.
+    let stranger = run("connect", "").await.unwrap();
+    assert_eq!(
+        stranger["error"],
+        gooti_core::bunker::handler::BROWSER_NOT_KNOWN
+    );
+    assert!(
+        asks.try_recv().is_err(),
+        "a stranger must not reach the desktop's window"
+    );
+
+    let connecting = run("connect", &secret);
+    let ask = tokio::time::timeout(std::time::Duration::from_secs(20), asks.recv())
+        .await
+        .expect("the desktop asks about the browser")
+        .unwrap();
+    assert_eq!(ask.method, "connect");
+    let shown = ask.details.browser.clone().unwrap();
+    assert_eq!(shown.name, "Work laptop");
+    assert_eq!(shown.code, browser_code(&browser_pubkey));
+    assert!(
+        service
+            .decide(&ask.key, true, gooti_core::bunker::policy::Remember::Once)
+            .unwrap()
+    );
+    let result = connecting.await.unwrap();
+    // Both sides compute the same code.
+    assert_eq!(result["code"], shown.code);
+    assert_eq!(result["signedBy"], alice.pubkey);
+    assert_eq!(result["valid"], true);
+    assert!(
+        service.pending().is_empty(),
+        "Basic signs a note without asking"
+    );
+    // The popup's check passes while the browser is allowed.
+    assert_eq!(run("check", &secret).await.unwrap()["checked"], true);
+
+    // Disconnect: the next request is told so, and nothing is signed.
+    gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_disconnect_browser(&browser_pubkey)
+        .unwrap();
+    service.refresh();
+    let result = run("sign", &secret).await.unwrap();
+    assert_eq!(result["error"], "Gooti Desktop disconnected this browser.");
+    // So does the popup's check.
+    let result = run("check", &secret).await.unwrap();
+    assert_eq!(result["error"], "Gooti Desktop disconnected this browser.");
     service.stop();
 }

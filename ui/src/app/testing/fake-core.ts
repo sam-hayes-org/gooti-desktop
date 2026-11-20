@@ -11,6 +11,10 @@ import {
   BackupActivity,
   BackupInfo,
   BackupOutcome,
+  BrowserList,
+  DeviceRow,
+  IdentityBrowsers,
+  Trust,
   UpdateInfo,
   VaultStatus,
 } from '../core/core.service';
@@ -27,6 +31,7 @@ export const ALICE: IdentitySummary = {
   keyMissing: false,
   servedElsewhere: false,
   custody: 'shared',
+  site: null,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -43,7 +48,7 @@ export const PHRASE =
 
 /** Stands in for the Rust core in UI tests. */
 export class FakeCore {
-  readonly appInfo = signal({ version: '0.1.0', channel: 'alpha' });
+  readonly appInfo = signal({ version: '0.1.0' });
   readonly status = signal<VaultStatus | null>('unlocked');
   readonly identities = signal<IdentitySummary[]>([]);
   readonly changes = signal(0);
@@ -92,6 +97,7 @@ export class FakeCore {
     this.identities.update((list) => list.map((i) => (i.id === id ? { ...i, custody } : i)));
     return { ...ALICE, ...this.identities().find((i) => i.id === id), id, custody };
   });
+  keepAsRegularIdentity = vi.fn(async (id: string) => ({ ...ALICE, id, site: null }));
   renameIdentity = vi.fn(async (id: string, nick: string) => ({ ...ALICE, id, nick }));
   setIdentityColor = vi.fn(async (id: string, color: string | null) => ({ ...ALICE, id, color }));
   /** Like the real one: the identity's apps are answered here from now on. */
@@ -136,6 +142,19 @@ export class FakeCore {
   disableBackup = vi.fn(async () => {
     this.backup = null;
   });
+  devices: DeviceRow[] = [
+    { id: 'aa'.repeat(16), name: 'Gooti Desktop on Linux', app: 'desktop', here: true, backedUpAt: null },
+    { id: 'bb'.repeat(16), name: 'Firefox on Linux', app: 'browser', here: false, backedUpAt: Date.now() },
+  ];
+  backupDevices = vi.fn(async () => this.devices);
+  renameDevice = vi.fn(async (name: string) => {
+    this.devices = this.devices.map((d) => (d.here ? { ...d, name: name.trim() } : d));
+    return this.devices;
+  });
+  removeDevice = vi.fn(async (id: string) => {
+    this.devices = this.devices.filter((d) => d.id !== id);
+    return this.devices;
+  });
 
   bunkerInfo = vi.fn(async () => this.bunker);
   refreshBunker = vi.fn(async () => this.bunkerState.set(this.status() === 'unlocked' ? this.bunker : null));
@@ -147,6 +166,25 @@ export class FakeCore {
   });
   bunkerRevoke = vi.fn(async (id: string) => {
     this.bunker = { ...this.bunker, connections: this.bunker.connections.filter((c) => c.id !== id) };
+  });
+  browserList: BrowserList = { browsers: [] };
+  bunkerBrowsers = vi.fn(async () => this.browserList);
+  bunkerBrowserDisconnect = vi.fn(async (clientPubkey: string) => {
+    this.browserList = {
+      ...this.browserList,
+      browsers: this.browserList.browsers.filter((b) => b.clientPubkey !== clientPubkey),
+    };
+    return this.browserList;
+  });
+  identityBrowserSettings: IdentityBrowsers = { trust: 'basic', relays: ['wss://relay.getgooti.com'], rules: [] };
+  identityBrowsers = vi.fn(async (_id: string) => this.identityBrowserSettings);
+  setIdentityBrowserTrust = vi.fn(async (_id: string, trust: Trust) => {
+    this.identityBrowserSettings = { ...this.identityBrowserSettings, trust };
+    return this.identityBrowserSettings;
+  });
+  setIdentityBrowserRelays = vi.fn(async (_id: string, relays: string[]) => {
+    this.identityBrowserSettings = { ...this.identityBrowserSettings, relays };
+    return this.identityBrowserSettings;
   });
   bunkerSetPaused = vi.fn(async (paused: boolean) => {
     this.bunker = { ...this.bunker, paused };
