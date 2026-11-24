@@ -556,7 +556,10 @@ impl Vault {
             .into_iter()
             .find(|i| i.pubkey == created.pubkey)
             .map(|i| serde_json::to_string(&i).expect("an identity serializes"))
-            .ok_or_else(|| "The new identity is not among the identities this AI assistant may use.".to_string()))
+            .ok_or_else(|| {
+                "The new identity is not among the identities this AI assistant may use."
+                    .to_string()
+            }))
     }
 
     pub fn bunker_revoke(&mut self, connection_id: &str) -> Result<()> {
