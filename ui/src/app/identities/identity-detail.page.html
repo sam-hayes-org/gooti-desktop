@@ -236,10 +236,10 @@
       }
 
       @if (agents().length) {
-        <section class="group" aria-label="AI agents">
-          <h2 class="section-title"><i class="bi bi-robot" aria-hidden="true"></i> AI agents</h2>
+        <section class="group" aria-label="AI assistants">
+          <h2 class="section-title"><i class="bi bi-robot" aria-hidden="true"></i> AI assistants</h2>
           <p class="copy">
-            AI agents that may use {{ identity.nick }}. Open one to set how far it may go without asking.
+            AI assistants that may use {{ identity.nick }}. Open one to set how far it may go without asking.
           </p>
           @for (connection of agents(); track connection.id) {
             <ng-container *ngTemplateOutlet="row; context: { $implicit: connection }" />

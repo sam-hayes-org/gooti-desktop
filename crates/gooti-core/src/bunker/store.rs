@@ -333,7 +333,7 @@ impl Vault {
         let now = time::now_ms();
         let agent = Agent {
             client_pubkey: link.client_pubkey.clone(),
-            name: link.name.unwrap_or_else(|| "An AI agent".into()),
+            name: link.name.unwrap_or_else(|| "An AI assistant".into()),
             url: link.url,
             home_pubkey: identity.clone(),
             scope,
@@ -542,7 +542,7 @@ impl Vault {
             .agent(&ask.client_pubkey)
             .is_none()
         {
-            return Ok(Err("This agent is not connected any more.".into()));
+            return Ok(Err("This AI assistant is not connected any more.".into()));
         }
         let created = match self.add_identity_as(&new.nick, NewKey::Generate, Custody::Desktop) {
             Ok(created) => created,
@@ -556,7 +556,7 @@ impl Vault {
             .into_iter()
             .find(|i| i.pubkey == created.pubkey)
             .map(|i| serde_json::to_string(&i).expect("an identity serializes"))
-            .ok_or_else(|| "The new identity is not in this agent's scope.".to_string()))
+            .ok_or_else(|| "The new identity is not among the identities this AI assistant may use.".to_string()))
     }
 
     pub fn bunker_revoke(&mut self, connection_id: &str) -> Result<()> {
@@ -1194,7 +1194,7 @@ impl Vault {
                 if agent.scope != AgentScope::DesktopOnly {
                     return Some(error(
                         ErrorCode::NotInScope,
-                        "This connection is for one identity only. Widen its scope in Gooti Desktop under Connections → AI agents.",
+                        "This connection is for one identity only. Widen what it may use in Gooti Desktop under Connections → AI assistants.",
                     ));
                 }
                 let nick = match request.params.first().map(|n| identity::normalize_nick(n)) {

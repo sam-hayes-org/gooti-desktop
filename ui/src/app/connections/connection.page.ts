@@ -174,8 +174,8 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
           </p>
         } @else if (detail.agent) {
           <p class="copy">
-            {{ detail.name }} is an AI agent. It uses {{ detail.identityNick }} as long as its scope covers
-            it. To change the scope or end it, go to Connections → AI agents.
+            {{ detail.name }} is an AI assistant. It uses {{ detail.identityNick }} as long as you let it. To
+            change what it may use, or to disconnect it, go to Connections → AI assistants.
           </p>
         } @else {
           <section class="group">

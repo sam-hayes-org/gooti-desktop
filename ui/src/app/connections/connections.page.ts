@@ -216,7 +216,7 @@ export class ConnectionsPage implements OnInit {
     }
     if (ask.method === 'gooti_create_identity') {
       const agent = this.agents()?.find((a) => a.clientPubkey === ask.clientPubkey);
-      return `${agent?.name ?? 'An AI agent'} wants to create the identity ${ask.details.newIdentity?.nick ?? ''}`;
+      return `${agent?.name ?? 'An AI assistant'} wants to create the identity ${ask.details.newIdentity?.nick ?? ''}`;
     }
     const app = this.info()?.connections.find((c) => c.id === ask.connectionId);
     return `${app ? this.appName(app) : 'An app'}: ${methodLabel(ask.method, ask.details.kind)}`;

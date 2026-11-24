@@ -163,7 +163,7 @@ describe('Identities', () => {
     );
   });
 
-  it('lists the apps and AI agents of an identity with their trust level, apart from other identities', async () => {
+  it('lists the apps and AI assistants of an identity with their trust level, apart from other identities', async () => {
     core.identities.set([ALICE]);
     core.bunkerState.set({
       relays: [],
@@ -189,7 +189,7 @@ describe('Identities', () => {
     expect(app.querySelector<HTMLElement>('.trust-pill')!.dataset['trust']).toBe('basic');
     expect(text(app.querySelector<HTMLElement>('.trust-pill')!)).toBe('Basic');
 
-    const agent = section('AI agents').querySelector<HTMLAnchorElement>('[data-connection]')!;
+    const agent = section('AI assistants').querySelector<HTMLAnchorElement>('[data-connection]')!;
     expect(text(agent)).toContain('Claude via Gooti MCP');
     expect(text(agent.querySelector<HTMLElement>('.trust-pill')!)).toBe('Trust');
 
@@ -197,14 +197,14 @@ describe('Identities', () => {
     expect(text(root)).not.toContain('Bobs app');
   });
 
-  it('shows no Apps or AI agents section for an identity without any', async () => {
+  it('shows no Apps or AI assistants section for an identity without any', async () => {
     core.identities.set([ALICE]);
     const fixture = TestBed.createComponent(IdentityDetailPage);
     fixture.componentRef.setInput('id', 'alice');
     await settle(fixture);
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('section[aria-label="Apps"]')).toBeNull();
-    expect(root.querySelector('section[aria-label="AI agents"]')).toBeNull();
+    expect(root.querySelector('section[aria-label="AI assistants"]')).toBeNull();
   });
 
   it('shows the private key only after Show, and deletes after the confirmation', async () => {

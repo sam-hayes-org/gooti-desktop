@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { AgentScope, CoreService, errorMessage, isAgentLink } from '../core/core.service';
 import { Select, SelectOption } from '../shared/select';
 
-export const AGENT_CONNECTED_NOTICE = 'The AI assistant is connected. It is listed under AI agents.';
+export const AGENT_CONNECTED_NOTICE = 'The AI assistant is connected. It is listed under AI assistants.';
 
 /** What a Gooti MCP `nostrconnect://` link says about the agent. */
 export function agentOfLink(link: string): { name: string; host: string | null } {

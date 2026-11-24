@@ -59,13 +59,13 @@ never reach the UI, except when you ask to show an nsec.
   **Forget**. Requests from a
   browser name the site ("primal.net through Work laptop"). There is no shared browser key: backup
   carries none, and a browser on Gooti 2.0.0 is told to update.
-- **AI agents** (Gooti MCP, `../gooti-mcp`; design there in `docs/DESIGN.md`, "Version 2"): a
+- **AI assistants** (Gooti MCP, `../gooti-mcp`; design there in `docs/DESIGN.md`, "Version 2"): a
   `nostrconnect://` link with `gooti=agent` comes from an AI assistant. Clicked or pasted, it opens
   **Connect an AI assistant**: who asks (name, and the Gooti MCP server it comes through), its default
   identity, and what it may use: **Only** that identity (default), or that identity **and all Desktop
   only identities** (the page names today's), including ones added later and ones it creates. The agent gets one ordinary connection
   per identity in its scope, all with its key, each starting at Ask every time; they follow at once
-  when an identity is created, deleted or moved. Connections → **AI agents** shows each agent with its
+  when an identity is created, deleted or moved. Connections → **AI assistants** shows each one with its
   scope (changeable there) and identities; **Rename** gives it a name of your own (shown in prompts
   and new Activities entries), and **Disconnect** ends it for all of them, on every Gooti Desktop. Two methods are for agents only: `gooti_list_identities` (the identities in scope, answered
   without asking) and `gooti_create_identity` (a new Desktop only identity; always asks in a window

@@ -182,6 +182,9 @@ every time, blue Basic, amber Trust (`_desktop.scss`).
   never see it. Data stored before 2026-11-12 is read through serde aliases (`synced`, `sync`).
 - Custody is "Where the key is used": **Browsers and desktops** or **Desktop only**. The actions are
   "Move key to desktop" and "Use in browsers again".
+- Claude, Grok and the like connected through Gooti MCP are **AI assistants** in text users read
+  ("Connections → AI assistants", "Connect an AI assistant"), never "AI agents". Code, error codes
+  (`agent_not_found`) and design docs keep `agent`.
 
 ## Git
 

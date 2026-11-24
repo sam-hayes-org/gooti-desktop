@@ -84,10 +84,10 @@ pub enum Error {
     #[error("Only a Desktop only identity has browsers that sign through this desktop.")]
     NotDesktopOnly,
     #[error(
-        "This connection belongs to an AI agent. Disconnect the agent under Connections → AI agents."
+        "This connection belongs to an AI assistant. Disconnect the assistant under Connections → AI assistants."
     )]
     AgentConnection,
-    #[error("This AI agent is not connected any more.")]
+    #[error("This AI assistant is not connected any more.")]
     AgentNotFound,
     #[error("Enter a name.")]
     AgentNameRequired,

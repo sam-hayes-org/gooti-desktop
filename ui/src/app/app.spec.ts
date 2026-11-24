@@ -120,7 +120,7 @@ describe('App', () => {
     const app = (id: string) => ({ id, clientPubkey: id, browsers: false, agent: false }) as BunkerConnection;
     const relay = (url: string, state: RelayStatus['state']): RelayStatus => ({ url, state });
 
-    it('counts each AI agent and browser once, not its connection per identity', async () => {
+    it('counts each AI assistant and browser once, not its connection per identity', async () => {
       const fixture = await render();
       const root = fixture.nativeElement as HTMLElement;
       const conn = (id: string, clientPubkey: string, kind: Partial<BunkerConnection> = {}) =>

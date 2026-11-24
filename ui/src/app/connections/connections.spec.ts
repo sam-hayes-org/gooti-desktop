@@ -53,7 +53,7 @@ describe('ConnectionsPage', () => {
     expect(text(root)).toContain('No app yet');
   });
 
-  it('lists AI agents apart from the apps, widens one after asking, and disconnects it', async () => {
+  it('lists AI assistants apart from the apps, widens one after asking, and disconnects it', async () => {
     core.bunker.connections = [{ ...CONNECTION, id: 'a1', name: 'Claude via Gooti MCP', agent: true }];
     core.agentList = [{
       clientPubkey: 'c1d2e3f4'.repeat(8),
@@ -100,7 +100,7 @@ describe('ConnectionsPage', () => {
     confirm.answer(true);
     await settle(fixture);
     expect(core.bunkerAgentDisconnect).toHaveBeenCalled();
-    expect(text(root)).toContain('No AI agent yet');
+    expect(text(root)).toContain('No AI assistant yet');
   });
 
   it('shows the trust level of each identity of an agent on hover, and marks Basic and Trust', async () => {
@@ -139,7 +139,7 @@ describe('ConnectionsPage', () => {
     const field = root.querySelector<HTMLInputElement>('input[aria-label="Gooti MCP address"]')!;
     expect(field.value).toBe('https://mcp.getgooti.com');
     expect(field.readOnly).toBe(true);
-    expect(field.closest('section')?.getAttribute('aria-label')).toBe('AI agents');
+    expect(field.closest('section')?.getAttribute('aria-label')).toBe('AI assistants');
   });
 
   it('lists the browsers apart from the apps, with no Remove for them', async () => {
@@ -352,7 +352,7 @@ describe('ApprovalPanel', () => {
     return { fixture, root: fixture.nativeElement as HTMLElement };
   }
 
-  it('asks before an AI agent creates an identity, without remembering', async () => {
+  it('asks before an AI assistant creates an identity, without remembering', async () => {
     core.bunker.connections = [{ ...CONNECTION, id: 'a1', name: 'Claude via Gooti MCP', agent: true }];
     core.pendingAsks.set([
       {
@@ -643,7 +643,7 @@ describe('AgentConnectPage', () => {
     await settle(fixture);
     expect(core.bunkerConnect).toHaveBeenCalledWith(LINK, 'alice', 'desktopOnly');
     expect(navigate).toHaveBeenCalledWith('/connections', {
-      state: { notice: 'The AI assistant is connected. It is listed under AI agents.' },
+      state: { notice: 'The AI assistant is connected. It is listed under AI assistants.' },
     });
   });
 
