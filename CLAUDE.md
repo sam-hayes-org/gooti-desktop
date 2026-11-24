@@ -70,6 +70,7 @@ After **any** change:
 ```
 npm test
 cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check   # the Develop run fails on unformatted code; `cargo fmt --all` fixes it
 ```
 
 After a change to **backup, the vault, identities, custody, or the bunker** (`crates/gooti-core/src/backup/`,
