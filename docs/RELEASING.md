@@ -48,7 +48,7 @@ Branches and what GitHub does with them:
 
 | Branch | On push |
 |---|---|
-| `beta`, `feature/...`, others | Nothing. |
+| `feature/next` (the working branch), others | Nothing. |
 | `develop` | **Develop** workflow: tests, clippy, fmt, then the Linux bundles (deb, AppImage) and the Windows installer, without update files; on Mac only a compile check. Download them from the run's page under Artifacts (kept 14 days). |
 | `main` | Nothing. Holds the release tags from 1.0.0 on. |
 | tag `v*` | **Release** workflow (below). |
@@ -58,7 +58,7 @@ Pull requests start nothing.
 Releases before 1.0.0 are tagged on `develop`. From 1.0.0 on, `develop` is merged into `main` and
 the releases are tagged there. Below, "the release branch" is `develop` before 1.0.0 and `main` after.
 
-1. On `beta`, once everything for the version is in, make the release commit, with every check in
+1. On `feature/next`, once everything for the version is in, make the release commit, with every check in
    `CLAUDE.md` passing:
 
    ```
@@ -67,9 +67,9 @@ the releases are tagged there. Below, "the release branch" is `develop` before 1
 
    This sets the version in `Cargo.toml` (the app version), `package.json` and the lock files. In
    `CHANGELOG.md`, rename "Unreleased" to "0.2.0 (date)" and start a new, empty "Unreleased" above it.
-   Commit both as "Release 0.2.0". The bump is the last commit on `beta`, so `beta`, `develop` and
+   Commit both as "Release 0.2.0". The bump is the last commit on `feature/next`, so `feature/next`, `develop` and
    later `main` carry the same version and nothing has to be merged back.
-2. Merge `beta` into `develop` (`git merge --no-ff beta`), push, and test the bundles from the Develop
+2. Merge `feature/next` into `develop` (`git merge --no-ff feature/next`), push, and test the bundles from the Develop
    run. From 1.0.0 on, then merge `develop` into `main`. Tag the release branch and push:
 
    ```

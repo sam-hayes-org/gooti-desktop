@@ -2,8 +2,8 @@ name: Develop
 
 # Every push to develop: tests, then Linux bundles and the Windows installer to download from the
 # run's page (Artifacts).
-# Nothing else starts a run here: not main (release.yml builds the v* tags), not beta or feature
-# branches, not pull requests.
+# Nothing else starts a run here: not main (release.yml builds the v* tags), not feature/next or
+# other branches, not pull requests.
 on:
   push:
     branches: [develop]

@@ -189,7 +189,9 @@ every time, blue Basic, amber Trust (`_desktop.scss`).
 
 ## Git
 
-Work on the `beta` branch, and commit there after a verified step. Leave `main` and `develop` alone unless
-asked. GitHub runs nothing for `beta`: a push to `develop` builds test bundles, a `v*` tag builds a
+Work on the `feature/next` branch, always (since 2026-11-24; it replaced `beta`), and commit there after a
+verified step. Leave `main` and `develop` alone unless asked; a fix the user asks for on `develop` goes back
+into `feature/next` afterwards. GitHub runs nothing for `feature/next`: a push to `develop` builds test
+bundles, a `v*` tag builds a
 release (`docs/RELEASING.md`). The user tags releases themselves: on `develop` before 1.0.0, on `main`
 from 1.0.0 on.
