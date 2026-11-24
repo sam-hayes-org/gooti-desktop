@@ -5,12 +5,34 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- **Update every Gooti Desktop that uses your passphrase.** Gooti Desktop 0.2.0 does not know AI
+  agents: it shows an agent's connections as separate apps, cannot answer when the agent lists or
+  creates identities, and leaves agents out of the backups it writes.
+- Connections: **AI agents**. AI assistants such as Claude or Grok connect through Gooti MCP
+  (https://mcp.getgooti.com) and act as your identities without ever getting a key. A link from
+  Gooti MCP opens **Connect an AI assistant**: who asks, which identity it starts with, and what it may
+  use: only that identity, or also every Desktop only identity, including ones you add later and ones
+  it creates. Each agent is listed with that choice (change it any time), its identities, **Rename**
+  and **Disconnect**. An agent asks before each request at first, like any app, and always before it
+  creates an identity (window **Create a new identity?**). Agents reach your other Gooti Desktops
+  through the backup.
+- Connections: the page lists **Browsers**, **Apps**, then **AI agents**; **Connect new app** sits
+  with Apps. An agent's identities are colored by how far it may go without asking (grey Ask every
+  time, blue Basic, amber Trust), and say so on hover. The number in the sidebar counts each app,
+  agent and browser once.
+- Identities: an identity's page lists its **Apps** and **AI agents** with the same colors; each opens
+  the page where you set its trust.
+- Every page has clearer section headings, with an icon.
+- Window: it can be as low as 400 pixels. Tiling window managers such as Hyprland ignore the minimum
+  height, and the bottom of the window (Lock Gooti, the end of long pages) was cut off.
 - Apps: an error reply carries a stable `code` next to the error text (`not_connected`, `rejected`,
   `timed_out`, `paused`, and more; list in `README.md`), so programs no longer have to match the
   text. The texts stay the same, and apps that do not know the code ignore it.
 - Apps: a disconnected app now learns so on the relay it uses. The answer to a client without a
   connection went only to the identity's browser relays; now it goes to the relays of the identity's
   apps too.
+- Building: `npm run dev` unlocks in about a quarter of a second instead of about 5 seconds (Argon2 is
+  optimized in dev builds too).
 
 ## 0.2.0 (2026-11-20)
 
