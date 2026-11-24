@@ -29,6 +29,8 @@ pub struct NostrConnect {
     pub name: Option<String>,
     pub url: Option<String>,
     pub image: Option<String>,
+    /// `agent`: an AI agent from Gooti MCP, which gets a scope (`state::AGENT_HINT`).
+    pub gooti: Option<String>,
 }
 
 pub fn parse_nostrconnect(input: &str) -> Result<NostrConnect> {
@@ -49,6 +51,7 @@ pub fn parse_nostrconnect(input: &str) -> Result<NostrConnect> {
         name: None,
         url: None,
         image: None,
+        gooti: None,
     };
     for pair in query.split('&').filter(|pair| !pair.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -67,6 +70,7 @@ pub fn parse_nostrconnect(input: &str) -> Result<NostrConnect> {
             "name" if !value.is_empty() => link.name = Some(value),
             "url" if !value.is_empty() => link.url = Some(value),
             "image" if !value.is_empty() => link.image = Some(value),
+            "gooti" if !value.is_empty() => link.gooti = Some(value),
             // Older links carry `metadata` as JSON.
             "metadata" => {
                 if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&value) {

@@ -7,7 +7,7 @@ use nostr::nips::{nip04, nip44};
 use nostr::types::Timestamp;
 use serde::Serialize;
 
-use super::message::{Incoming, Response, Scheme};
+use super::message::{ErrorCode, Incoming, Response, Scheme};
 use super::policy::{Reason, Trust, Verdict, evaluate};
 use super::state::{
     BROWSER_HINT, BrowserDevice, BunkerData, ClientMeta, Connection, INVITE_LIFETIME_MS,
@@ -99,7 +99,24 @@ pub struct AskDetails {
     /// A Gooti browser asking to sign through this desktop with its own key (method `connect`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserAsk>,
+    /// An AI agent asking for a new Desktop only identity (`GOOTI_CREATE_IDENTITY`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_identity: Option<NewIdentityAsk>,
 }
+
+/// What the approval window shows for an AI agent that asks for a new identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewIdentityAsk {
+    pub nick: String,
+    pub color: Option<String>,
+}
+
+/// An AI agent asks Gooti for the identities in its scope (gooti-mcp `docs/DESIGN.md`,
+/// "Version 2"). Answered at once, without asking.
+pub const GOOTI_LIST_IDENTITIES: &str = "gooti_list_identities";
+/// An AI agent asks for a new Desktop only identity: `[nick, color]`. Always asks, never remembered.
+pub const GOOTI_CREATE_IDENTITY: &str = "gooti_create_identity";
 
 /// What the approval window shows for a browser that asks to connect.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -144,7 +161,11 @@ pub fn handle(
     }
     if data.paused {
         return (
-            reply_error(request, "Gooti is paused on this desktop."),
+            reply_error(
+                request,
+                ErrorCode::Paused,
+                "Gooti is paused on this desktop.",
+            ),
             false,
         );
     }
@@ -166,14 +187,17 @@ pub fn handle(
         .find(|c| c.client_pubkey == *client && c.identity_pubkey == identity_pubkey)
     else {
         // A disconnected browser learns so, and makes a new key to ask again.
-        let text = if data.browser(client).is_some_and(|b| b.blocked) {
-            BROWSER_DISCONNECTED
+        let (code, text) = if data.browser(client).is_some_and(|b| b.blocked) {
+            (ErrorCode::BrowserDisconnected, BROWSER_DISCONNECTED)
         } else if data.retired_shared_keys.contains(client) {
-            BROWSER_UPDATE
+            (ErrorCode::BrowserUpdate, BROWSER_UPDATE)
         } else {
-            "Not connected. Connect to this bunker first."
+            (
+                ErrorCode::NotConnected,
+                "Not connected. Connect to this bunker first.",
+            )
         };
-        return (reply_error(request, text), false);
+        return (reply_error(request, code, text), false);
     };
     // "Last used" is saved at most once a minute, so a busy app does not rewrite the vault.
     let mut changed = connection
@@ -223,9 +247,13 @@ pub fn handle(
                     }),
                 )
             }
-            Err(error) => reply_error(request, error),
+            Err(error) => reply_error(request, ErrorCode::InvalidParams, error),
         },
-        other => reply_error(request, &format!("Unsupported method: {other}")),
+        other => reply_error(
+            request,
+            ErrorCode::UnsupportedMethod,
+            &format!("Unsupported method: {other}"),
+        ),
     };
     (outcome, changed)
 }
@@ -286,7 +314,10 @@ fn connect(
                 .browser(&incoming.client_pubkey)
                 .is_some_and(|b| b.blocked)
         {
-            return (reply_error(request, BROWSER_NOT_KNOWN), false);
+            return (
+                reply_error(request, ErrorCode::BrowserNotKnown, BROWSER_NOT_KNOWN),
+                false,
+            );
         }
         return browser_connect(data, identity_pubkey, signer_pubkey, incoming, meta, now);
     }
@@ -303,6 +334,7 @@ fn connect(
         return (
             reply_error(
                 request,
+                ErrorCode::LinkInvalid,
                 "This connection link was used before or has expired.",
             ),
             true,
@@ -328,6 +360,7 @@ fn connect(
         trust: Trust::default(),
         rules: Vec::new(),
         browsers: false,
+        agent: false,
     });
     (Outcome::Reply(Response::ok(&request.id, "ack")), true)
 }
@@ -356,7 +389,14 @@ fn browser_connect(
     let client = &incoming.client_pubkey;
     let known = data.browser(client).cloned();
     match known {
-        Some(browser) if browser.blocked => (reply_error(request, BROWSER_DISCONNECTED), false),
+        Some(browser) if browser.blocked => (
+            reply_error(
+                request,
+                ErrorCode::BrowserDisconnected,
+                BROWSER_DISCONNECTED,
+            ),
+            false,
+        ),
         Some(browser) if browser.approved_at.is_some() => {
             add_browser_connection(data, identity_pubkey, &browser, now);
             (Outcome::Reply(Response::ok(&request.id, "ack")), true)
@@ -419,6 +459,7 @@ pub fn add_browser_connection(
         trust: data.browser_trust_of(identity_pubkey),
         rules: Vec::new(),
         browsers: true,
+        agent: false,
     });
 }
 
@@ -452,8 +493,8 @@ pub fn app_relays<'a>(data: &'a BunkerData, connection: &'a Connection) -> &'a V
     }
 }
 
-fn reply_error(request: &super::message::Request, error: &str) -> Outcome {
-    Outcome::Reply(Response::error(&request.id, error))
+fn reply_error(request: &super::message::Request, code: ErrorCode, error: &str) -> Outcome {
+    Outcome::Reply(Response::error(&request.id, code, error))
 }
 
 fn details(method: &str, params: &[String]) -> Result<AskDetails, &'static str> {
@@ -467,6 +508,7 @@ fn details(method: &str, params: &[String]) -> Result<AskDetails, &'static str> 
             peer: None,
             site: None,
             browser: None,
+            new_identity: None,
         });
     }
     let peer = params.first().ok_or("Missing public key.")?;
@@ -649,7 +691,9 @@ mod tests {
         // Without the secret from the backup: refused, and nobody is asked.
         let mut data = BunkerData::default();
         let stranger = run(&mut data, incoming("connect", &[SIGNER, "", "", meta]), 5);
-        assert_eq!(reply(stranger).error.as_deref(), Some(BROWSER_NOT_KNOWN));
+        let stranger = reply(stranger);
+        assert_eq!(stranger.error.as_deref(), Some(BROWSER_NOT_KNOWN));
+        assert_eq!(stranger.code, Some(ErrorCode::BrowserNotKnown));
         let wrong = incoming(
             "connect",
             &[SIGNER, "ffffffffffffffffffffffffffffffff", "", meta],
@@ -717,6 +761,7 @@ mod tests {
         });
         let refused = reply(run(&mut data, ask_connect(), 40));
         assert_eq!(refused.error.as_deref(), Some(BROWSER_DISCONNECTED));
+        assert_eq!(refused.code, Some(ErrorCode::BrowserDisconnected));
         assert!(data.connections.is_empty());
         // So is any other request from it.
         let ping = reply(run(&mut data, incoming("ping", &[]), 50));
@@ -770,6 +815,7 @@ mod tests {
         data.retired_shared_keys.push(CLIENT.into());
         let ping = reply(run(&mut data, incoming("ping", &[]), 10));
         assert_eq!(ping.error.as_deref(), Some(BROWSER_UPDATE));
+        assert_eq!(ping.code, Some(ErrorCode::BrowserUpdate));
         assert!(data.connections.is_empty());
     }
 
@@ -848,6 +894,20 @@ mod tests {
             response.error.as_deref(),
             Some("Not connected. Connect to this bunker first.")
         );
+        assert_eq!(response.code, Some(ErrorCode::NotConnected));
+    }
+
+    #[test]
+    fn a_disconnected_or_logged_out_app_gets_not_connected() {
+        let mut data = connected();
+        reply(run(&mut data, incoming("logout", &[]), 20));
+        let after = reply(run(&mut data, incoming("ping", &[]), 30));
+        assert_eq!(after.code, Some(ErrorCode::NotConnected));
+
+        let mut data = connected();
+        data.connections.clear();
+        let after = reply(run(&mut data, incoming("sign_event", &["{}"]), 30));
+        assert_eq!(after.code, Some(ErrorCode::NotConnected));
     }
 
     #[test]
@@ -1039,12 +1099,27 @@ mod tests {
 
         let mut data = connected();
         data.paused = true;
+        let paused = reply(run(&mut data, incoming("ping", &[]), 20));
         assert_eq!(
-            reply(run(&mut data, incoming("ping", &[]), 20))
-                .error
-                .as_deref(),
+            paused.error.as_deref(),
             Some("Gooti is paused on this desktop.")
         );
+        assert_eq!(paused.code, Some(ErrorCode::Paused));
+    }
+
+    #[test]
+    fn a_used_link_and_bad_requests_get_their_codes() {
+        let mut fresh = with_invite();
+        let wrong = reply(run(&mut fresh, incoming("connect", &[SIGNER, "wrong"]), 20));
+        assert_eq!(wrong.code, Some(ErrorCode::LinkInvalid));
+
+        let mut data = connected();
+
+        let unknown = reply(run(&mut data, incoming("get_relays", &[]), 20));
+        assert_eq!(unknown.code, Some(ErrorCode::UnsupportedMethod));
+
+        let missing = reply(run(&mut data, incoming("nip44_encrypt", &[]), 20));
+        assert_eq!(missing.code, Some(ErrorCode::InvalidParams));
     }
 
     #[test]

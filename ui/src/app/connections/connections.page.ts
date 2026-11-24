@@ -1,8 +1,20 @@
 import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { BrowserList, BunkerAsk, CoreService, Trust, errorMessage } from '../core/core.service';
+import {
+  AgentInfo,
+  AgentScope,
+  BrowserList,
+  BunkerAsk,
+  CoreService,
+  Trust,
+  errorMessage,
+} from '../core/core.service';
 import { ConfirmService } from '../shared/confirm.service';
+import { CopyButton } from '../shared/copy-button';
+import { Select, SelectOption } from '../shared/select';
+import { Tooltip } from '../shared/tooltip';
+import { TRUST_CHOICES } from './connection.page';
 import { methodLabel } from './kinds';
 
 export const TRUST_LABELS: Record<Trust, string> = {
@@ -11,9 +23,12 @@ export const TRUST_LABELS: Record<Trust, string> = {
   trust: 'Trusted',
 };
 
+/** The hosted Gooti MCP server (gooti-mcp). */
+export const MCP_URL = 'https://mcp.getgooti.com';
+
 @Component({
   selector: 'app-connections-page',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, Select, CopyButton, Tooltip],
   host: { class: 'page' },
   templateUrl: './connections.page.html',
   styleUrl: './connections.page.scss',
@@ -29,19 +44,94 @@ export class ConnectionsPage implements OnInit {
   protected readonly notice = signal('');
   /** "Browsers": each browser with its own key. */
   protected readonly browsers = signal<BrowserList | null>(null);
-  /** Apps, without the browsers: those have their own section. */
-  protected readonly apps = computed(() => (this.info()?.connections ?? []).filter((c) => !c.browsers));
+  /** Where AI assistants add Gooti MCP. */
+  protected readonly mcpUrl = MCP_URL;
+  /** "AI agents": each agent with its scope and identities. */
+  protected readonly agents = signal<AgentInfo[] | null>(null);
+  /** Apps, without the browsers and the AI agents: those have their own sections. */
+  protected readonly apps = computed(() =>
+    (this.info()?.connections ?? []).filter((c) => !c.browsers && !c.agent),
+  );
   constructor() {
     effect(() => {
-      // A browser that was allowed elsewhere, or a backup, changes the connections: read again.
+      // A browser or agent that connected elsewhere, or a backup, changes the connections: read again.
       if (this.info()) {
-        untracked(() => void this.#loadBrowsers());
+        untracked(() => {
+          void this.#loadBrowsers();
+          void this.#loadAgents();
+        });
       }
     });
   }
 
   async #loadBrowsers(): Promise<void> {
     this.browsers.set(await this.core.bunkerBrowsers().catch(() => null));
+  }
+
+  async #loadAgents(): Promise<void> {
+    this.agents.set(await this.core.bunkerAgents().catch(() => null));
+  }
+
+  protected scopeOptions(agent: AgentInfo): SelectOption<AgentScope>[] {
+    const home = agent.homeNick ?? 'its identity';
+    return [
+      { value: 'identity', label: `Only ${home}` },
+      { value: 'desktopOnly', label: `${home} and all Desktop only identities` },
+    ];
+  }
+
+  async setAgentScope(agent: AgentInfo, scope: AgentScope): Promise<void> {
+    if (scope === agent.scope) {
+      return;
+    }
+    if (scope === 'desktopOnly') {
+      const yes = await this.#confirm.ask(
+        `Let ${agent.name} use all your Desktop only identities, and create new ones? Gooti asks you before each new identity.`,
+        { yesLabel: 'Widen scope' },
+      );
+      if (!yes) {
+        // The select shows the old scope again.
+        this.agents.update((list) => list?.map((a) => ({ ...a })) ?? null);
+        return;
+      }
+    }
+    await this.#run(async () => {
+      this.agents.set(await this.core.bunkerAgentSetScope(agent.clientPubkey, scope));
+    });
+  }
+
+  /** The agent being renamed, and the name typed so far. */
+  protected readonly renaming = signal<string | null>(null);
+  protected readonly newName = signal('');
+
+  startRename(agent: AgentInfo): void {
+    this.newName.set(agent.name);
+    this.renaming.set(agent.clientPubkey);
+  }
+
+  async saveName(agent: AgentInfo): Promise<void> {
+    const name = this.newName().trim();
+    if (!name || name === agent.name) {
+      this.renaming.set(null);
+      return;
+    }
+    await this.#run(async () => {
+      this.agents.set(await this.core.bunkerAgentRename(agent.clientPubkey, name));
+      this.renaming.set(null);
+    });
+  }
+
+  async disconnectAgent(agent: AgentInfo): Promise<void> {
+    const yes = await this.#confirm.ask(
+      `Disconnect ${agent.name}? It can no longer use any of your identities until you connect it again.`,
+      { yesLabel: 'Disconnect', danger: true },
+    );
+    if (!yes) {
+      return;
+    }
+    await this.#run(async () => {
+      this.agents.set(await this.core.bunkerAgentDisconnect(agent.clientPubkey));
+    });
   }
 
   async disconnectBrowser(name: string, clientPubkey: string): Promise<void> {
@@ -109,9 +199,24 @@ export class ConnectionsPage implements OnInit {
 
   protected readonly trustLabel: Record<Trust, string> = TRUST_LABELS;
 
+  /** The trust level of one of an agent's connections (one per identity). */
+  protected trustOf(connectionId: string): Trust | null {
+    return this.info()?.connections.find((c) => c.id === connectionId)?.trust ?? null;
+  }
+
+  /** Its trust level and what it means, on hover, so the identity need not be opened to see it. */
+  protected trustHint(connectionId: string): string {
+    const choice = TRUST_CHOICES.find((c) => c.value === this.trustOf(connectionId));
+    return choice ? `${choice.label}: ${choice.copy}` : 'Open to set how far it may go without asking.';
+  }
+
   protected askLabel(ask: BunkerAsk): string {
     if (ask.method === 'connect') {
       return `${ask.details.browser?.name ?? 'A browser'} wants to sign through this desktop`;
+    }
+    if (ask.method === 'gooti_create_identity') {
+      const agent = this.agents()?.find((a) => a.clientPubkey === ask.clientPubkey);
+      return `${agent?.name ?? 'An AI assistant'} wants to create the identity ${ask.details.newIdentity?.nick ?? ''}`;
     }
     const app = this.info()?.connections.find((c) => c.id === ask.connectionId);
     return `${app ? this.appName(app) : 'An app'}: ${methodLabel(ask.method, ask.details.kind)}`;

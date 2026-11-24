@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { ConfirmService } from '../shared/confirm.service';
-import { ALICE, FakeCore, button, provideFakeCore, setInput, setTextarea, settle, text } from '../testing/fake-core';
+import { ALICE, CONNECTION, FakeCore, button, provideFakeCore, setInput, setTextarea, settle, text } from '../testing/fake-core';
 import { IdentitiesPage } from './identities.page';
 import { IdentityDetailPage } from './identity-detail.page';
 import { IdentityNewPage } from './identity-new.page';
@@ -161,6 +161,50 @@ describe('Identities', () => {
     expect(root.querySelector('[role="alert"]')?.textContent).toBe(
       'An identity with this public key already exists: Alice',
     );
+  });
+
+  it('lists the apps and AI assistants of an identity with their trust level, apart from other identities', async () => {
+    core.identities.set([ALICE]);
+    core.bunkerState.set({
+      relays: [],
+      linkRelays: [],
+      paused: false,
+      relayStatus: [],
+      connections: [
+        { ...CONNECTION, id: 'app', name: 'Coracle', trust: 'basic' as const },
+        { ...CONNECTION, id: 'agent', name: 'Claude via Gooti MCP', agent: true, trust: 'trust' as const },
+        { ...CONNECTION, id: 'browser', name: 'Firefox', browsers: true },
+        { ...CONNECTION, id: 'bobs', identityId: 'bob', name: 'Bobs app' },
+      ],
+    });
+    const fixture = TestBed.createComponent(IdentityDetailPage);
+    fixture.componentRef.setInput('id', 'alice');
+    await settle(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    const section = (label: string) => root.querySelector<HTMLElement>(`section[aria-label="${label}"]`)!;
+
+    const app = section('Apps').querySelector<HTMLAnchorElement>('[data-connection]')!;
+    expect(text(app)).toContain('Coracle');
+    expect(app.getAttribute('href')).toBe('/connections/app');
+    expect(app.querySelector<HTMLElement>('.trust-pill')!.dataset['trust']).toBe('basic');
+    expect(text(app.querySelector<HTMLElement>('.trust-pill')!)).toBe('Basic');
+
+    const agent = section('AI assistants').querySelector<HTMLAnchorElement>('[data-connection]')!;
+    expect(text(agent)).toContain('Claude via Gooti MCP');
+    expect(text(agent.querySelector<HTMLElement>('.trust-pill')!)).toBe('Trust');
+
+    expect(text(root)).not.toContain('Firefox');
+    expect(text(root)).not.toContain('Bobs app');
+  });
+
+  it('shows no Apps or AI assistants section for an identity without any', async () => {
+    core.identities.set([ALICE]);
+    const fixture = TestBed.createComponent(IdentityDetailPage);
+    fixture.componentRef.setInput('id', 'alice');
+    await settle(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('section[aria-label="Apps"]')).toBeNull();
+    expect(root.querySelector('section[aria-label="AI assistants"]')).toBeNull();
   });
 
   it('shows the private key only after Show, and deletes after the confirmation', async () => {

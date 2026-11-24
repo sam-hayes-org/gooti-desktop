@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/gooti-core", "src-tauri"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/sam-hayes-org/gooti-desktop"
@@ -26,3 +26,11 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
+
+# Dev builds (npm run dev): Argon2id unlocks the vault in about 5 s without optimizations and in a
+# quarter of a second with them. Optimize just the KDF; the app's own code stays debuggable.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

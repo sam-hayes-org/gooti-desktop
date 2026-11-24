@@ -21,7 +21,7 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
       }
 
       <section class="group">
-        <p class="kicker">Version</p>
+        <h2 class="section-title"><i class="bi bi-tag" aria-hidden="true"></i> Version</h2>
         <p class="copy" data-info="version">
           @if (core.appInfo(); as info) {
             {{ info.version }}
@@ -32,25 +32,25 @@ export const AUTHOR_NPUB = 'npub1tgyjshvelwj73t3jy0n3xllgt03elkapfl3k3n0x2wkuneg
       </section>
 
       <section class="group">
-        <p class="kicker">Website</p>
+        <h2 class="section-title"><i class="bi bi-globe" aria-hidden="true"></i> Website</h2>
         <button type="button" class="link" data-link="website" (click)="open('website')">www.getgooti.com</button>
       </section>
 
       <section class="group">
-        <p class="kicker">Source code</p>
+        <h2 class="section-title"><i class="bi bi-code-slash" aria-hidden="true"></i> Source code</h2>
         <button type="button" class="link" data-link="source" (click)="open('source')">
           github.com/sam-hayes-org/gooti-desktop
         </button>
       </section>
 
       <section class="group">
-        <p class="kicker">License</p>
+        <h2 class="section-title"><i class="bi bi-file-earmark-text" aria-hidden="true"></i> License</h2>
         <p class="copy">Gooti Desktop is under the MIT License. It ships with open-source software by others.</p>
         <a class="link" routerLink="/info/licenses" data-link="licenses">Open-source licenses</a>
       </section>
 
       <section class="group">
-        <p class="kicker">Keyboard shortcuts</p>
+        <h2 class="section-title"><i class="bi bi-keyboard" aria-hidden="true"></i> Keyboard shortcuts</h2>
         <dl class="shortcuts">
           @for (shortcut of shortcuts; track shortcut.keys) {
             <dt><kbd>{{ shortcut.keys }}</kbd></dt>

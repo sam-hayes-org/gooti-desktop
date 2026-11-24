@@ -29,6 +29,35 @@
       @if (waiting() > 1) {
         <p class="copy waiting">{{ waiting() - 1 }} more waiting.</p>
       }
+    } @else if (ask.method === 'gooti_create_identity') {
+      <h1>Create a new identity?</h1>
+      <div class="who">
+        <span class="app">{{ appName() }}</span>
+        <span class="copy">wants a new Desktop only identity</span>
+      </div>
+      <div class="body">
+        <p class="field-label">Nick</p>
+        <p class="new-identity">
+          @if (ask.details.newIdentity?.color; as color) {
+            <span class="swatch" [style.background]="color"></span>
+          }
+          <strong>{{ ask.details.newIdentity?.nick }}</strong>
+        </p>
+        <p class="copy">
+          Its key is made here and stays on this desktop; backup keeps it for your other Gooti Desktops.
+          {{ appName() }} can use it right away, and starts at Asks every time. Asked {{ askedAgo() }}.
+        </p>
+      </div>
+      @if (error()) {
+        <p class="sam-error" role="alert">{{ error() }}</p>
+      }
+      <div class="buttons">
+        <button type="button" class="action quiet" [disabled]="busy()" (click)="decide(false)">Reject</button>
+        <button type="button" class="action primary" [disabled]="busy()" (click)="decide(true)">Create</button>
+      </div>
+      @if (waiting() > 1) {
+        <p class="copy waiting">{{ waiting() - 1 }} more waiting.</p>
+      }
     } @else {
     <h1>{{ title() }}</h1>
     <div class="who">

@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 use super::blob::{open_plaintext, seal_plaintext};
 use crate::bunker::policy::Trust;
-use crate::bunker::state::{BrowserDevice, Connection};
+use crate::bunker::state::{Agent, BrowserDevice, Connection};
 use crate::error::{Error, Result};
 
 /// Milliseconds since 1970, like the shared record's stamps.
@@ -75,6 +75,9 @@ pub struct DesktopDocument {
     /// Identity → how far browsers may go for that Desktop only identity without asking.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub browser_trust: BTreeMap<String, Row<Trust>>,
+    /// Agent key → AI agent from Gooti MCP with its scope (`bunker::state::Agent`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub agents: BTreeMap<String, Row<Agent>>,
 }
 
 impl DesktopDocument {
@@ -131,6 +134,7 @@ pub fn merge_desktop_documents(
         browsers: merge_rows(&local.browsers, &remote.browsers),
         browser_relays: merge_rows(&local.browser_relays, &remote.browser_relays),
         browser_trust: merge_rows(&local.browser_trust, &remote.browser_trust),
+        agents: merge_rows(&local.agents, &remote.agents),
     }
 }
 
