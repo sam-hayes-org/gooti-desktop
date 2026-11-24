@@ -5,6 +5,8 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+## 0.3.0 (2026-11-24)
+
 - **Update every Gooti Desktop that uses your passphrase.** Gooti Desktop 0.2.0 does not know AI
   assistants: it shows an assistant's connections as separate apps, cannot answer when the assistant
   lists or creates identities, and leaves assistants out of the backups it writes.
