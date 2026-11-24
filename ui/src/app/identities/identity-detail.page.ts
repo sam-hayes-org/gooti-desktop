@@ -1,4 +1,5 @@
-import { Component, OnDestroy, effect, inject, input, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { Component, OnDestroy, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { relaysFromText, relaysToText } from '../backup/relays';
@@ -7,12 +8,13 @@ import { methodLabel } from '../connections/kinds';
 import { BrowserRule, CoreService, IdentityBrowsers, IdentitySummary, Trust, errorMessage } from '../core/core.service';
 import { ConfirmService } from '../shared/confirm.service';
 import { CopyButton } from '../shared/copy-button';
+import { Tooltip } from '../shared/tooltip';
 import { colorForPubkey } from './appearance';
 import { IdentityAvatar } from './identity-avatar';
 
 @Component({
   selector: 'app-identity-detail-page',
-  imports: [FormsModule, RouterLink, IdentityAvatar, CopyButton],
+  imports: [FormsModule, RouterLink, NgTemplateOutlet, IdentityAvatar, CopyButton, Tooltip],
   host: { class: 'page' },
   templateUrl: './identity-detail.page.html',
   styleUrl: './identity-detail.page.scss',
@@ -42,6 +44,26 @@ export class IdentityDetailPage implements OnDestroy {
   protected readonly relaysNotice = signal('');
   protected readonly trustChoices = TRUST_CHOICES;
   protected readonly ruleUntil = ruleUntil;
+
+  /** This identity's connections, as on Connections: apps, then AI agents. Browsers have their own section. */
+  readonly #connections = computed(() => {
+    const id = this.identity()?.id;
+    return (this.#core.bunkerState()?.connections ?? []).filter((c) => c.identityId === id && !c.browsers);
+  });
+  protected readonly apps = computed(() => this.#connections().filter((c) => !c.agent));
+  protected readonly agents = computed(() => this.#connections().filter((c) => c.agent));
+
+  protected trustLabel(trust: Trust): string {
+    return TRUST_CHOICES.find((c) => c.value === trust)?.label ?? trust;
+  }
+
+  protected trustCopy(trust: Trust): string {
+    return TRUST_CHOICES.find((c) => c.value === trust)?.copy ?? '';
+  }
+
+  protected when(ms: number | null): string {
+    return ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Never';
+  }
 
   constructor() {
     effect(() => {

@@ -42,14 +42,63 @@
   gap: 8px;
 }
 
-// Section label, same as the extension's Settings screen.
-.kicker {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
+// A section heading, on every page: seen at first glance, with an icon. The space above sets the
+// sections apart.
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  color: #ffffff;
+  font-size: 17px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+
+  .bi {
+    color: var(--primary);
+    font-size: 17px;
+  }
+}
+
+// A red heading for what cannot be undone.
+.section-title.danger {
+  margin-top: 30px;
+  color: #dc3545;
+
+  .bi {
+    color: #dc3545;
+  }
+}
+
+// How far an app, agent or browser may go without asking, as a color: grey asks every time, blue
+// (Basic) signs everyday events, amber (Trust) signs everything. Put `data-trust` on the element.
+.trust-tint {
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+
+  &[data-trust="basic"] {
+    background: rgba(76, 154, 255, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(76, 154, 255, 0.5);
+    color: #9cc5ff;
+  }
+
+  &[data-trust="trust"] {
+    background: rgba(240, 195, 109, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(240, 195, 109, 0.55);
+    color: #f5d48f;
+  }
+}
+
+// A section heading with its button on the right (Apps → Connect new app).
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+
+  .section-title {
+    margin-top: 0;
+  }
 }
 
 .copy {

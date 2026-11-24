@@ -103,6 +103,45 @@ describe('ConnectionsPage', () => {
     expect(text(root)).toContain('No AI agent yet');
   });
 
+  it('shows the trust level of each identity of an agent on hover, and marks Basic and Trust', async () => {
+    core.bunker.connections = [
+      { ...CONNECTION, id: 'a1', name: 'Claude via Gooti MCP', agent: true, trust: 'trust' as const },
+      { ...CONNECTION, id: 'a2', name: 'Claude via Gooti MCP', agent: true, trust: 'ask' as const },
+      { ...CONNECTION, id: 'a3', name: 'Claude via Gooti MCP', agent: true, trust: 'basic' as const },
+    ];
+    core.agentList = [{
+      clientPubkey: 'c1d2e3f4'.repeat(8),
+      name: 'Claude via Gooti MCP',
+      url: null,
+      scope: 'desktopOnly' as const,
+      homeIdentityId: 'alice',
+      homeNick: 'Alice',
+      identities: [
+        { id: 'alice', nick: 'Alice', connectionId: 'a1' },
+        { id: 'bob', nick: 'Bob', connectionId: 'a2' },
+        { id: 'carol', nick: 'Carol', connectionId: 'a3' },
+      ],
+      approvedAt: 0,
+      lastUsedAt: null,
+    }];
+    const { root } = await render();
+    const [alice, bob, carol] = Array.from(root.querySelectorAll<HTMLElement>('[data-agent] .identity-chip'));
+    expect(alice.dataset['trust']).toBe('trust');
+    expect(bob.dataset['trust']).toBe('ask');
+    expect(carol.dataset['trust']).toBe('basic');
+    alice.dispatchEvent(new MouseEvent('mouseenter'));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(document.body.textContent).toContain('Trust: Everything is approved without asking.');
+  });
+
+  it('gives the Gooti MCP address to add to an AI assistant', async () => {
+    const { root } = await render();
+    const field = root.querySelector<HTMLInputElement>('input[aria-label="Gooti MCP address"]')!;
+    expect(field.value).toBe('https://mcp.getgooti.com');
+    expect(field.readOnly).toBe(true);
+    expect(field.closest('section')?.getAttribute('aria-label')).toBe('AI agents');
+  });
+
   it('lists the browsers apart from the apps, with no Remove for them', async () => {
     core.bunker.connections = [{ ...CONNECTION, name: 'Work laptop', browsers: true, trust: 'basic' }];
     core.browserList = { browsers: [] };
@@ -155,7 +194,7 @@ describe('ConnectionsPage', () => {
     expect(text(root)).toContain('All apps are paused.');
   });
 
-  it('opens Connect new app from the heading and shows its note on return', async () => {
+  it('opens Connect new app from the Apps heading and shows its note on return', async () => {
     history.replaceState({ notice: 'The app is connected.' }, '');
     const { root } = await render();
     history.replaceState(null, '');

@@ -17,7 +17,7 @@
 
   @if (info() === null) {
     <section class="group">
-      <p class="kicker">Backup is off</p>
+      <h2 class="section-title"><i class="bi bi-cloud-slash" aria-hidden="true"></i> Backup is off</h2>
       <div class="sam-card empty-card">
         <p class="title">Back up your identities</p>
         <p class="copy">
@@ -37,7 +37,7 @@
 
   @if (info(); as info) {
     <section class="group">
-      <p class="kicker">Backup</p>
+      <h2 class="section-title"><i class="bi bi-cloud-check" aria-hidden="true"></i> Backup</h2>
       <div class="meter">
         <p class="field-label">Backup size</p>
         <div class="meter-readout">
@@ -88,7 +88,7 @@
     <app-backup-devices />
 
     <section class="group">
-      <p class="kicker">Relays</p>
+      <h2 class="section-title"><i class="bi bi-broadcast" aria-hidden="true"></i> Relays</h2>
       <textarea
         class="sam-box relays"
         rows="3"
@@ -104,7 +104,7 @@
     </section>
 
     <section class="group">
-      <p class="kicker danger">Danger zone</p>
+      <h2 class="section-title danger"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Danger zone</h2>
       <p class="copy">Your identities stay on this desktop. The backup on the relays stays as it is.</p>
       <button type="button" class="action danger" [disabled]="busy()" (click)="turnOff()">
         Turn off backup

@@ -27,7 +27,7 @@
     }
 
     <section class="group">
-      <p class="kicker">Nick</p>
+      <h2 class="section-title"><i class="bi bi-person" aria-hidden="true"></i> Nick</h2>
       <form class="inline" (submit)="$event.preventDefault(); saveNick()">
         <div class="sam-field grow">
           <input type="text" name="nick" aria-label="Nick" autocomplete="off" [(ngModel)]="nick" />
@@ -37,7 +37,7 @@
     </section>
 
     <section class="group">
-      <p class="kicker">Color</p>
+      <h2 class="section-title"><i class="bi bi-palette" aria-hidden="true"></i> Color</h2>
       <div class="inline">
         <input
           type="color"
@@ -51,7 +51,7 @@
     </section>
 
     <section class="group">
-      <p class="kicker">Keys</p>
+      <h2 class="section-title"><i class="bi bi-key" aria-hidden="true"></i> Keys</h2>
       <p class="field-label">Public key</p>
       <div class="sam-field">
         <input type="text" class="mono" aria-label="Public key (npub)" readonly [value]="identity.npub" />
@@ -98,7 +98,7 @@
 
     @if (identity.servedElsewhere) {
       <section class="group served-elsewhere">
-        <p class="kicker">Signing</p>
+        <h2 class="section-title"><i class="bi bi-pc-display" aria-hidden="true"></i> Signing</h2>
         <p class="copy">
           Another Gooti Desktop answers apps and browsers for this identity. This desktop holds the key
           too. If that desktop was this computer before a reset, or you no longer use it, sign here.
@@ -111,7 +111,7 @@
 
     @if (identity.hasPrivateKey) {
       <section class="group">
-        <p class="kicker">Where the key is used</p>
+        <h2 class="section-title"><i class="bi bi-geo-alt" aria-hidden="true"></i> Where the key is used</h2>
         @if (identity.custody === 'desktop') {
           <p class="custody"><i class="bi bi-pc-display"></i> Desktop only</p>
           <p class="copy">
@@ -160,7 +160,7 @@
 
       @if (identity.custody === 'desktop' && browsers(); as settings) {
         <section class="group" aria-label="Browsers">
-          <p class="kicker">Browsers</p>
+          <h2 class="section-title"><i class="bi bi-window-stack" aria-hidden="true"></i> Browsers</h2>
           <p class="copy">
             How far your browsers may go as {{ identity.nick }} without asking. The same for every browser;
             Connections → Browsers lists them.
@@ -225,8 +225,30 @@
         </section>
       }
 
+      @if (apps().length) {
+        <section class="group" aria-label="Apps">
+          <h2 class="section-title"><i class="bi bi-grid" aria-hidden="true"></i> Apps</h2>
+          <p class="copy">Apps that sign as {{ identity.nick }}. Open one to set how far it may go without asking.</p>
+          @for (connection of apps(); track connection.id) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: connection }" />
+          }
+        </section>
+      }
+
+      @if (agents().length) {
+        <section class="group" aria-label="AI agents">
+          <h2 class="section-title"><i class="bi bi-robot" aria-hidden="true"></i> AI agents</h2>
+          <p class="copy">
+            AI agents that may use {{ identity.nick }}. Open one to set how far it may go without asking.
+          </p>
+          @for (connection of agents(); track connection.id) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: connection }" />
+          }
+        </section>
+      }
+
       <section class="group">
-        <p class="kicker">Export</p>
+        <h2 class="section-title"><i class="bi bi-box-arrow-up" aria-hidden="true"></i> Export</h2>
         <p class="copy">
           An ncryptsec is this private key, locked with a password you choose. Other Nostr apps can import it.
         </p>
@@ -258,8 +280,27 @@
     }
 
     <section class="group">
-      <p class="kicker danger">Danger zone</p>
+      <h2 class="section-title danger"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Danger zone</h2>
       <button type="button" class="action danger" (click)="delete()">Delete identity</button>
     </section>
   </div>
 }
+
+<!-- One app or AI agent of this identity: opens its page, where its trust and remembered choices are. -->
+<ng-template #row let-connection>
+  <a class="sam-card connection-row" [routerLink]="['/connections', connection.id]" data-connection>
+    <span class="connection-text">
+      <span class="connection-name">
+        @if (connection.agent) {
+          <i class="bi bi-robot"></i>
+        }
+        {{ connection.name ?? 'App ' + connection.clientPubkey.slice(0, 8) + '…' }}
+        <i class="bi bi-chevron-right chevron"></i>
+      </span>
+      <span class="copy">Last used: {{ when(connection.lastUsedAt) }}</span>
+    </span>
+    <span class="trust-pill trust-tint" [attr.data-trust]="connection.trust" [appTooltip]="trustCopy(connection.trust)">
+      {{ trustLabel(connection.trust) }}
+    </span>
+  </a>
+</ng-template>

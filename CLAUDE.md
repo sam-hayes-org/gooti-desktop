@@ -154,6 +154,16 @@ draws nothing in it:
 
 Only the tray menu, notifications and the window frame stay system.
 
+**Section headings.** Every section heading on a page, including new ones, is
+`<h2 class="section-title"><i class="bi bi-…" aria-hidden="true"></i> Label</h2>`: 17 px, white, with a blue
+Bootstrap icon that fits the section. Danger zone adds `danger` (red, warning icon). A heading with a button on
+its right goes in `<div class="section-head">` (Apps → Connect new app). The styles are in `_desktop.scss`.
+Don't bring back the small grey uppercase label (`kicker`); it was removed on 2026-11-24. Labels inside a
+section (above a field, "Remembered") stay `field-label`.
+
+**Trust colors.** Wherever a trust level shows, put `trust-tint` and `data-trust` on the element: grey Ask
+every time, blue Basic, amber Trust (`_desktop.scss`).
+
 ## Wording (same rules as the extension)
 
 - Sentence case for headings and buttons ("New identity", "Delete identity").

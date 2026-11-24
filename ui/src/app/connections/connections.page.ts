@@ -11,7 +11,10 @@ import {
   errorMessage,
 } from '../core/core.service';
 import { ConfirmService } from '../shared/confirm.service';
+import { CopyButton } from '../shared/copy-button';
 import { Select, SelectOption } from '../shared/select';
+import { Tooltip } from '../shared/tooltip';
+import { TRUST_CHOICES } from './connection.page';
 import { methodLabel } from './kinds';
 
 export const TRUST_LABELS: Record<Trust, string> = {
@@ -20,9 +23,12 @@ export const TRUST_LABELS: Record<Trust, string> = {
   trust: 'Trusted',
 };
 
+/** The hosted Gooti MCP server (gooti-mcp). */
+export const MCP_URL = 'https://mcp.getgooti.com';
+
 @Component({
   selector: 'app-connections-page',
-  imports: [FormsModule, RouterLink, Select],
+  imports: [FormsModule, RouterLink, Select, CopyButton, Tooltip],
   host: { class: 'page' },
   templateUrl: './connections.page.html',
   styleUrl: './connections.page.scss',
@@ -38,6 +44,8 @@ export class ConnectionsPage implements OnInit {
   protected readonly notice = signal('');
   /** "Browsers": each browser with its own key. */
   protected readonly browsers = signal<BrowserList | null>(null);
+  /** Where AI assistants add Gooti MCP. */
+  protected readonly mcpUrl = MCP_URL;
   /** "AI agents": each agent with its scope and identities. */
   protected readonly agents = signal<AgentInfo[] | null>(null);
   /** Apps, without the browsers and the AI agents: those have their own sections. */
@@ -190,6 +198,17 @@ export class ConnectionsPage implements OnInit {
   }
 
   protected readonly trustLabel: Record<Trust, string> = TRUST_LABELS;
+
+  /** The trust level of one of an agent's connections (one per identity). */
+  protected trustOf(connectionId: string): Trust | null {
+    return this.info()?.connections.find((c) => c.id === connectionId)?.trust ?? null;
+  }
+
+  /** Its trust level and what it means, on hover, so the identity need not be opened to see it. */
+  protected trustHint(connectionId: string): string {
+    const choice = TRUST_CHOICES.find((c) => c.value === this.trustOf(connectionId));
+    return choice ? `${choice.label}: ${choice.copy}` : 'Open to set how far it may go without asking.';
+  }
 
   protected askLabel(ask: BunkerAsk): string {
     if (ask.method === 'connect') {

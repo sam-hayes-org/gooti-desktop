@@ -92,7 +92,19 @@ export class App implements OnInit {
     }
   }
   /** How many apps sign through this desktop. Null until the bunker was read. */
-  protected readonly connectionCount = computed(() => this.core.bunkerState()?.connections.length ?? null);
+  /**
+   * What Connections lists: each app, and each AI agent and browser once (they have a connection per
+   * identity they reach, under their own key).
+   */
+  protected readonly connectionCount = computed(() => {
+    const connections = this.core.bunkerState()?.connections;
+    if (!connections) {
+      return null;
+    }
+    const apps = connections.filter((c) => !c.browsers && !c.agent).length;
+    const grouped = new Set(connections.filter((c) => c.browsers || c.agent).map((c) => c.clientPubkey));
+    return apps + grouped.size;
+  });
 
   /** The bunker's relays for the sidebar: how many are connected, and a color for it. */
   protected readonly relays = computed<RelaySummary | null>(() => {
