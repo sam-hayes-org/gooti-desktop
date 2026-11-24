@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { CoreService, errorMessage } from './core/core.service';
+import { CoreService, errorMessage, isAgentLink } from './core/core.service';
 import { MOD, withMod } from './shared/shortcuts';
 import { NAV_ITEMS } from './nav';
 import { ApprovalPanel } from './connections/approval-panel';
@@ -61,11 +61,14 @@ export class App implements OnInit {
       untracked(() => this.#showBackupBar(busy));
     });
     effect(() => {
-      // A clicked nostrconnect:// link: "Connect new app" takes it from there.
-      if (this.core.connectLink() && this.core.status() === 'unlocked' && !this.core.isApprovalWindow()) {
+      // A clicked nostrconnect:// link: "Connect new app" takes it from there, or "Connect an AI
+      // assistant" for one from Gooti MCP.
+      const link = this.core.connectLink();
+      if (link && this.core.status() === 'unlocked' && !this.core.isApprovalWindow()) {
+        const page = isAgentLink(link) ? '/connections/agent' : '/connections/new';
         untracked(() => {
-          if (this.#router.url !== '/connections/new') {
-            void this.#router.navigateByUrl('/connections/new');
+          if (this.#router.url !== page) {
+            void this.#router.navigateByUrl(page);
           }
         });
       }
@@ -89,7 +92,19 @@ export class App implements OnInit {
     }
   }
   /** How many apps sign through this desktop. Null until the bunker was read. */
-  protected readonly connectionCount = computed(() => this.core.bunkerState()?.connections.length ?? null);
+  /**
+   * What Connections lists: each app, and each AI agent and browser once (they have a connection per
+   * identity they reach, under their own key).
+   */
+  protected readonly connectionCount = computed(() => {
+    const connections = this.core.bunkerState()?.connections;
+    if (!connections) {
+      return null;
+    }
+    const apps = connections.filter((c) => !c.browsers && !c.agent).length;
+    const grouped = new Set(connections.filter((c) => c.browsers || c.agent).map((c) => c.clientPubkey));
+    return apps + grouped.size;
+  });
 
   /** The bunker's relays for the sidebar: how many are connected, and a color for it. */
   protected readonly relays = computed<RelaySummary | null>(() => {

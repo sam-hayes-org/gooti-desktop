@@ -1,13 +1,11 @@
 <div class="page-inner">
   <div class="page-head">
     <h1 class="page-title">Connections</h1>
-    <button type="button" class="action primary" routerLink="/connections/new" data-action="new-connection">
-      <i class="bi bi-plus-lg"></i> Connect new app
-    </button>
   </div>
   <p class="copy">
-    Nostr apps on your phone or computer can sign through this desktop. Your private keys stay here. Gooti
-    asks you before it signs, encrypts, or decrypts anything.
+    Browsers with Gooti, Nostr apps on your phone or computer, and AI assistants such as Claude can sign
+    through this desktop. Your private keys stay here, and you decide how far each one may go without asking
+    you.
   </p>
 
   @if (notice()) {
@@ -24,7 +22,7 @@
 
     @if (core.pendingAsks().length) {
       <section class="group">
-        <p class="kicker">Waiting</p>
+        <h2 class="section-title"><i class="bi bi-hourglass-split" aria-hidden="true"></i> Waiting</h2>
         <p class="copy">These requests also show in their own small window.</p>
         @for (ask of core.pendingAsks(); track ask.key) {
           <div class="sam-card app-row">
@@ -47,8 +45,41 @@
       </section>
     }
 
+    <section class="group" aria-label="Browsers">
+      <h2 class="section-title"><i class="bi bi-window-stack" aria-hidden="true"></i> Browsers</h2>
+      <p class="copy">
+        Browsers with Gooti sign through this desktop for your Desktop only identities. Each one asks once, and
+        you allow it here. If a device is lost, disconnect its browser: its key stops working at once.
+      </p>
+      @if (browsers(); as list) {
+        @for (browser of list.browsers; track browser.clientPubkey) {
+          <div class="sam-card app-row" data-browser>
+            <div class="app-text">
+              <span class="app-name"><i class="bi bi-window"></i> {{ browser.name }}</span>
+              <span class="copy">Code <span class="mono code">{{ browser.code }}</span> · Allowed {{ when(browser.approvedAt) }}</span>
+              <span class="copy">Last used: {{ when(browser.lastUsedAt) }}</span>
+            </div>
+            <button type="button" class="action quiet" [disabled]="busy()" (click)="disconnectBrowser(browser.name, browser.clientPubkey)">
+              Disconnect
+            </button>
+          </div>
+        }
+        @if (!list.browsers.length) {
+          <div class="sam-card empty-card">
+            <p class="title">No browser yet</p>
+            <p class="copy">A browser with Gooti asks here when it needs one of your Desktop only identities.</p>
+          </div>
+        }
+      }
+    </section>
+
     <section class="group">
-      <p class="kicker">Apps</p>
+      <div class="section-head">
+        <h2 class="section-title"><i class="bi bi-grid" aria-hidden="true"></i> Apps</h2>
+        <button type="button" class="action primary" routerLink="/connections/new" data-action="new-connection">
+          <i class="bi bi-plus-lg"></i> Connect new app
+        </button>
+      </div>
       @for (connection of apps(); track connection.id) {
         <div class="sam-card app-row">
           <a class="app-text app-link" [routerLink]="['/connections', connection.id]">
@@ -91,36 +122,88 @@
       </label>
     </section>
 
-    <section class="group" aria-label="Browsers">
-      <p class="kicker">Browsers</p>
+    <section class="group" aria-label="AI assistants">
+      <h2 class="section-title"><i class="bi bi-robot" aria-hidden="true"></i> AI assistants</h2>
       <p class="copy">
-        Browsers with Gooti sign through this desktop for your Desktop only identities. Each one asks once, and
-        you allow it here. If a device is lost, disconnect its browser: its key stops working at once.
+        AI assistants such as Claude, connected through Gooti MCP. Each one uses the identities you allow it.
+        Gooti asks you before each request unless you allow more on an identity's page, and always before it
+        creates an identity.
       </p>
-      @if (browsers(); as list) {
-        @for (browser of list.browsers; track browser.clientPubkey) {
-          <div class="sam-card app-row" data-browser>
-            <div class="app-text">
-              <span class="app-name"><i class="bi bi-window"></i> {{ browser.name }}</span>
-              <span class="copy">Code <span class="mono code">{{ browser.code }}</span> · Allowed {{ when(browser.approvedAt) }}</span>
-              <span class="copy">Last used: {{ when(browser.lastUsedAt) }}</span>
+      <p class="copy">To connect one, add Gooti MCP to it with this address and sign in there:</p>
+      <div class="sam-field mcp-url">
+        <input type="text" class="mono" aria-label="Gooti MCP address" readonly [value]="mcpUrl" />
+        <app-copy-button [text]="mcpUrl" />
+      </div>
+      @if (agents(); as list) {
+        @for (agent of list; track agent.clientPubkey) {
+          <div class="sam-card agent-card" data-agent>
+            @if (renaming() === agent.clientPubkey) {
+              <form class="rename" (submit)="$event.preventDefault(); saveName(agent)">
+                <div class="sam-field grow">
+                  <input
+                    type="text"
+                    name="agentName"
+                    aria-label="Name"
+                    autocomplete="off"
+                    maxlength="80"
+                    [ngModel]="newName()"
+                    (ngModelChange)="newName.set($event)"
+                  />
+                </div>
+                <button type="submit" class="action primary" [disabled]="!newName().trim() || busy()">Save</button>
+                <button type="button" class="action quiet" (click)="renaming.set(null)">Cancel</button>
+              </form>
+            } @else {
+              <div class="agent-head">
+                <div class="app-text">
+                  <span class="app-name"><i class="bi bi-robot"></i> {{ agent.name }}</span>
+                  <span class="copy">
+                    Connected {{ when(agent.approvedAt) }} · Last used: {{ when(agent.lastUsedAt) }}
+                  </span>
+                </div>
+                <div class="row-buttons">
+                  <button type="button" class="action quiet" [disabled]="busy()" (click)="startRename(agent)">
+                    Rename
+                  </button>
+                  <button type="button" class="action quiet" [disabled]="busy()" (click)="disconnectAgent(agent)">
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            }
+            <label class="field-label" [attr.for]="'scope-' + agent.clientPubkey">May use</label>
+            <app-select
+              class="scope-select"
+              [inputId]="'scope-' + agent.clientPubkey"
+              [options]="scopeOptions(agent)"
+              [ngModel]="agent.scope"
+              (ngModelChange)="setAgentScope(agent, $event)"
+            />
+            <div class="agent-identities">
+              @for (identity of agent.identities; track identity.connectionId) {
+                <a
+                  class="identity-chip trust-tint"
+                  [routerLink]="['/connections', identity.connectionId]"
+                  [attr.data-trust]="trustOf(identity.connectionId)"
+                  [appTooltip]="trustHint(identity.connectionId)"
+                >
+                  {{ identity.nick }} <i class="bi bi-chevron-right"></i>
+                </a>
+              }
             </div>
-            <button type="button" class="action quiet" [disabled]="busy()" (click)="disconnectBrowser(browser.name, browser.clientPubkey)">
-              Disconnect
-            </button>
+            <span class="copy">Open an identity to set how far {{ agent.name }} may go without asking.</span>
           </div>
-        }
-        @if (!list.browsers.length) {
+        } @empty {
           <div class="sam-card empty-card">
-            <p class="title">No browser yet</p>
-            <p class="copy">A browser with Gooti asks here when it needs one of your Desktop only identities.</p>
+            <p class="title">No AI assistant yet</p>
+            <p class="copy">An AI assistant connects through Gooti MCP. It shows up here once you allow it.</p>
           </div>
         }
       }
     </section>
 
     <section class="group">
-      <p class="kicker">Listening on</p>
+      <h2 class="section-title"><i class="bi bi-broadcast" aria-hidden="true"></i> Listening on</h2>
       <p class="copy">The relays your apps use.</p>
       @for (relay of info.relayStatus; track relay.url) {
         <div class="relay-status" [attr.data-state]="relay.state">

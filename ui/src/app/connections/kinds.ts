@@ -49,6 +49,8 @@ export function methodLabel(method: string, kind?: number | null): string {
     case 'nip04_decrypt':
     case 'nip44_decrypt':
       return `Decrypt (${method.slice(0, 5).toUpperCase()})`;
+    case 'gooti_create_identity':
+      return 'Create a Desktop only identity';
     default:
       return method;
   }

@@ -451,6 +451,58 @@ fn bunker_calls_use_the_ui_argument_names() {
         "connection_not_found"
     );
 
+    // An AI agent from Gooti MCP: listed with its scope, changed and disconnected as a whole.
+    let agent_key = "c1d2e3f4".repeat(8);
+    h.ok(
+        "bunker_connect",
+        json!({
+            "link": format!("nostrconnect://{agent_key}?relay={DEAD_LOCAL_RELAY}&secret=y&name=Claude&gooti=agent"),
+            "identityId": id,
+            "scope": "desktopOnly"
+        }),
+    );
+    let agents = h.ok("bunker_agents", json!({}));
+    assert_eq!(agents[0]["name"], "Claude");
+    assert_eq!(agents[0]["scope"], "desktopOnly");
+    assert_eq!(agents[0]["homeNick"], "Alice");
+    assert_eq!(agents[0]["identities"][0]["nick"], "Alice");
+    let agent_connection = agents[0]["identities"][0]["connectionId"].as_str().unwrap();
+    assert_eq!(
+        h.err("bunker_revoke", json!({ "connectionId": agent_connection }))["code"],
+        "agent_connection"
+    );
+    let agents = h.ok(
+        "bunker_agent_set_scope",
+        json!({ "clientPubkey": agent_key, "scope": "identity" }),
+    );
+    assert_eq!(agents[0]["scope"], "identity");
+    let agents = h.ok(
+        "bunker_agent_rename",
+        json!({ "clientPubkey": agent_key, "name": " Claude on the laptop " }),
+    );
+    assert_eq!(agents[0]["name"], "Claude on the laptop");
+    assert_eq!(
+        h.err(
+            "bunker_agent_rename",
+            json!({ "clientPubkey": agent_key, "name": "" })
+        )["code"],
+        "agent_name_required"
+    );
+    assert_eq!(
+        h.ok(
+            "bunker_agent_disconnect",
+            json!({ "clientPubkey": agent_key })
+        ),
+        json!([])
+    );
+    assert_eq!(
+        h.err(
+            "bunker_agent_disconnect",
+            json!({ "clientPubkey": agent_key })
+        )["code"],
+        "agent_not_found"
+    );
+
     h.ok("bunker_set_paused", json!({ "paused": true }));
     assert_eq!(h.ok("bunker_info", json!({}))["paused"], true);
     h.ok(

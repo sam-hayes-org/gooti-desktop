@@ -62,8 +62,10 @@ impl Vault {
             .clone();
         let keys = BackupKeys::from_hex(&backup.signing_key_hex, &backup.encryption_key_hex)?;
         let (document, changed) = project(unlocked, &backup.document, now());
-        let had_removed = !unlocked.data.bunker.removed.is_empty();
+        let had_removed = !unlocked.data.bunker.removed.is_empty()
+            || !unlocked.data.bunker.removed_agents.is_empty();
         unlocked.data.bunker.removed.clear();
+        unlocked.data.bunker.removed_agents.clear();
         if changed {
             let backup = unlocked
                 .data
@@ -99,7 +101,11 @@ impl Vault {
             .as_ref()
             .ok_or(Error::BackupOff)?;
         let (_, changed) = project(unlocked, &backup.document, now());
-        if changed || backup.document != *planned || !unlocked.data.bunker.removed.is_empty() {
+        if changed
+            || backup.document != *planned
+            || !unlocked.data.bunker.removed.is_empty()
+            || !unlocked.data.bunker.removed_agents.is_empty()
+        {
             return Ok(Applied::Stale);
         }
         let backup = unlocked
@@ -131,6 +137,7 @@ impl Vault {
         };
         !backup.unsent
             && unlocked.data.bunker.removed.is_empty()
+            && unlocked.data.bunker.removed_agents.is_empty()
             && !project(unlocked, &backup.document, now()).1
     }
 
@@ -247,6 +254,19 @@ pub(super) fn project(
     }
     for (identity, trust) in &data.bunker.browser_trust {
         changed |= put(&mut document.browser_trust, identity, *trust, now);
+    }
+    for agent in &data.bunker.agents {
+        changed |= put(
+            &mut document.agents,
+            &agent.client_pubkey,
+            agent.clone(),
+            now,
+        );
+    }
+    for client in &data.bunker.removed_agents {
+        if data.bunker.agent(client).is_none() {
+            changed |= bury(&mut document.agents, client, now);
+        }
     }
     if let Some(at) = data.bunker.relays_at
         && document
@@ -385,6 +405,27 @@ pub(super) fn hydrate(unlocked: &mut Unlocked, full: bool) {
             None => {
                 data.bunker.browser_trust.insert(identity.clone(), *trust);
             }
+        }
+    }
+    for (client, row) in &document.agents {
+        match row.live() {
+            Some(agent) if !data.bunker.removed_agents.contains(client) => {
+                match data
+                    .bunker
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.client_pubkey == *client)
+                {
+                    Some(local) if full => *local = agent.clone(),
+                    Some(_) => {}
+                    None => data.bunker.agents.push(agent.clone()),
+                }
+            }
+            // Disconnected on another desktop: its connections go with it below.
+            None if full => {
+                data.bunker.agents.retain(|a| a.client_pubkey != *client);
+            }
+            _ => {}
         }
     }
     let blocked: Vec<String> = data

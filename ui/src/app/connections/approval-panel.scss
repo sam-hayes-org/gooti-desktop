@@ -128,3 +128,19 @@ h1 {
   margin: 0;
   color: #f0c36d;
 }
+
+// An AI agent's new identity: its nick, with the color it asked for.
+.new-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex: none;
+  }
+}

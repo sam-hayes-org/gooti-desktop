@@ -9,10 +9,11 @@ use nostr::event::{Event, EventBuilder, EventId, FinalizeEvent, Kind, Tag};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use super::handler::{Ask, BROWSER_CONNECT, BROWSER_DISCONNECTED, Outcome};
-use super::message::{Response, Scheme, response_event};
+use super::handler::{Ask, BROWSER_CONNECT, BROWSER_DISCONNECTED, GOOTI_CREATE_IDENTITY, Outcome};
+use super::message::{ErrorCode, Response, Scheme, response_event};
 use super::policy::{Policy, Reason, Remember, rule_for};
 use super::pool::{RelayPool, RelayStatus};
+use super::state::AgentScope;
 use crate::activity::{Activity, ActivityEntry};
 use crate::error::Result;
 use crate::gooti::Gooti;
@@ -21,6 +22,9 @@ use crate::time;
 /// An unanswered request is refused after this, so the app is not left hanging.
 pub const ASK_TIMEOUT_MS: i64 = 5 * 60 * 1000;
 const SEEN_LIMIT: usize = 1000;
+
+/// The answer to a question nobody answered on the desktop in time.
+const TIMED_OUT: &str = "Nobody answered on the desktop in time.";
 
 /// A waiting request as the approval window lists it: `times` is how often the app sent it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -44,6 +48,8 @@ pub enum Notice {
     Activity,
     /// A relay connected, was lost, was added, or was dropped. Read `relay_status()`.
     Relays,
+    /// An identity was added here without the UI asking for it (an AI agent's new identity).
+    Identities,
 }
 
 pub type Notify = Arc<dyn Fn(Notice) + Send + Sync>;
@@ -143,10 +149,20 @@ impl BunkerService {
 
     /// Connects the app behind a pasted `nostrconnect://` link and tells it so.
     pub fn accept_nostrconnect(&self, link: &str, identity_id: &str) -> Result<()> {
-        let reply = self
-            .gooti()
-            .vault_mut()
-            .bunker_accept_nostrconnect(link, identity_id)?;
+        self.accept_nostrconnect_scoped(link, identity_id, AgentScope::Identity)
+    }
+
+    /// Like `accept_nostrconnect`; an AI agent's link (Gooti MCP) gets this scope.
+    pub fn accept_nostrconnect_scoped(
+        &self,
+        link: &str,
+        identity_id: &str,
+        scope: AgentScope,
+    ) -> Result<()> {
+        let reply =
+            self.gooti()
+                .vault_mut()
+                .bunker_accept_nostrconnect_scoped(link, identity_id, scope)?;
         self.refresh();
         let response = Response::ok(&uuid::Uuid::new_v4().to_string(), reply.secret);
         if let Some(event) = response_event(
@@ -178,6 +194,14 @@ impl BunkerService {
         };
         if ask.method == BROWSER_CONNECT {
             self.decide_browser(&ask, approve)?;
+            (self.notify)(Notice::Pending);
+            return Ok(true);
+        }
+        if ask.method == GOOTI_CREATE_IDENTITY {
+            // Never remembered: every new identity is asked about.
+            for ask in std::iter::once(&ask).chain(&repeats) {
+                self.decide_new_identity(ask, approve)?;
+            }
             (self.notify)(Notice::Pending);
             return Ok(true);
         }
@@ -222,7 +246,11 @@ impl BunkerService {
             self.gooti()
                 .vault_mut()
                 .bunker_block_browser(&ask.client_pubkey, &name)?;
-            Response::error(&ask.request_id, BROWSER_DISCONNECTED)
+            Response::error(
+                &ask.request_id,
+                ErrorCode::BrowserDisconnected,
+                BROWSER_DISCONNECTED,
+            )
         };
         self.answer(ask, &response)?;
         self.refresh();
@@ -231,12 +259,36 @@ impl BunkerService {
         Ok(())
     }
 
+    /// Create or Reject for an AI agent's new identity. Created, it is in the agent's scope at once.
+    fn decide_new_identity(&self, ask: &Ask, approve: bool) -> Result<()> {
+        if !approve {
+            return self.refuse(ask, Reason::User);
+        }
+        let result = self.gooti().vault_mut().bunker_create_identity_for(ask)?;
+        let (response, error) = match result {
+            Ok(created) => (Response::ok(&ask.request_id, created), None),
+            Err(error) => (
+                Response::error(&ask.request_id, ErrorCode::Failed, error.clone()),
+                Some(error),
+            ),
+        };
+        self.answer(ask, &response)?;
+        self.log_request(ask, true, Reason::User, error);
+        self.refresh();
+        (self.notify)(Notice::Connections);
+        (self.notify)(Notice::Identities);
+        Ok(())
+    }
+
     /// Signs, encrypts or decrypts with the identity key, answers, and logs it.
     fn carry_out(&self, ask: &Ask, reason: Reason) -> Result<()> {
         let result = self.gooti().vault().bunker_perform(ask)?;
         let (response, error) = match result {
             Ok(result) => (Response::ok(&ask.request_id, result), None),
-            Err(error) => (Response::error(&ask.request_id, error.clone()), Some(error)),
+            Err(error) => (
+                Response::error(&ask.request_id, ErrorCode::Failed, error.clone()),
+                Some(error),
+            ),
         };
         self.answer(ask, &response)?;
         self.log_request(ask, true, reason, error);
@@ -244,12 +296,12 @@ impl BunkerService {
     }
 
     fn refuse(&self, ask: &Ask, reason: Reason) -> Result<()> {
-        let text = if reason == Reason::TimedOut {
-            "Nobody answered on the desktop in time."
+        let (code, text) = if reason == Reason::TimedOut {
+            (ErrorCode::TimedOut, TIMED_OUT)
         } else {
-            "Rejected."
+            (ErrorCode::Rejected, "Rejected.")
         };
-        self.answer(ask, &Response::error(&ask.request_id, text))?;
+        self.answer(ask, &Response::error(&ask.request_id, code, text))?;
         self.log_request(ask, false, reason, None);
         Ok(())
     }
@@ -353,7 +405,7 @@ impl BunkerService {
         for ask in &expired {
             let _ = self.answer(
                 ask,
-                &Response::error(&ask.request_id, "Nobody answered on the desktop in time."),
+                &Response::error(&ask.request_id, ErrorCode::TimedOut, TIMED_OUT),
             );
         }
         (self.notify)(Notice::Pending);

@@ -62,7 +62,7 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
 
         @if (detail.servedElsewhere) {
           <section class="group served-elsewhere">
-            <p class="kicker">Signing</p>
+            <h2 class="section-title"><i class="bi bi-pc-display" aria-hidden="true"></i> Signing</h2>
             <p class="copy">
               Another Gooti Desktop answers this app. This desktop holds the key of
               {{ detail.identityNick }} too. If that desktop was this computer before a reset, or you no
@@ -76,7 +76,7 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
         }
 
         <section class="group">
-          <p class="kicker">Relays</p>
+          <h2 class="section-title"><i class="bi bi-broadcast" aria-hidden="true"></i> Relays</h2>
           @if (detail.browsers) {
             <p class="copy">
               Your browsers reach this desktop through these relays. Backup takes a change to them. One relay
@@ -111,7 +111,7 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
         </section>
 
         <section class="group">
-          <p class="kicker">Without asking</p>
+          <h2 class="section-title"><i class="bi bi-shield-check" aria-hidden="true"></i> Without asking</h2>
           @for (choice of choices; track choice.value) {
             <label class="choice-row">
               <input
@@ -139,7 +139,7 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
         </section>
 
         <section class="group">
-          <p class="kicker">Recent activity</p>
+          <h2 class="section-title"><i class="bi bi-clock-history" aria-hidden="true"></i> Recent activity</h2>
           @if (recent().length) {
             <app-activity-list [entries]="recent()" />
             <a class="show-all" routerLink="/activity" [queryParams]="{ app: id() }">
@@ -151,7 +151,7 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
         </section>
 
         <section class="group">
-          <p class="kicker">Remembered</p>
+          <h2 class="section-title"><i class="bi bi-bookmark-check" aria-hidden="true"></i> Remembered</h2>
           @for (rule of detail.rules; track rule.method + (rule.kind ?? '')) {
             <div class="sam-card rule-row">
               <div class="rule-text">
@@ -172,9 +172,14 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
             This is how {{ detail.name }} reaches {{ detail.identityNick }}, whose key stays on this
             desktop. To end it, disconnect the browser under Connections → Browsers.
           </p>
+        } @else if (detail.agent) {
+          <p class="copy">
+            {{ detail.name }} is an AI assistant. It uses {{ detail.identityNick }} as long as you let it. To
+            change what it may use, or to disconnect it, go to Connections → AI assistants.
+          </p>
         } @else {
           <section class="group">
-            <p class="kicker danger">Danger zone</p>
+            <h2 class="section-title danger"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Danger zone</h2>
             <button type="button" class="action danger" [disabled]="busy()" (click)="remove()">Remove app</button>
           </section>
         }
@@ -259,11 +264,6 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
 
     .served-elsewhere .action {
       align-self: flex-start;
-    }
-
-    .kicker.danger {
-      margin-top: 30px;
-      color: #dc3545;
     }
 
     .action.danger {

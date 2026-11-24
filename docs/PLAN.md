@@ -22,12 +22,13 @@ None right now.
 | Stack | Tauri 2, Rust core, Angular UI. The server app later reuses `gooti-core`. |
 | Key model | Custody per identity: **Synced** (as today) or **Desktop only** (the shared record carries a bunker pointer; the key is in the desktop record, which browsers cannot open). New desktop identities default to Desktop only. |
 | Requests from your own browsers | No option. Since 2026-11-11 the extension sends every sign, encrypt, and decrypt from a bunker identity straight to the bunker: linking a site to the identity already answered the site question, and a second browser popup did not fit Primal's 8-second timeout. For other bunkers the browser still asks before each deletion (kind 5) or erase (kind 62); for Desktop only identities it does not, since the desktop sees the site and asks for these sensitive kinds itself (Basic and Ask every time). The old **Sites and the bunker** setting is gone from both apps; `bunker.askSite` stays in the sync format and is passed on unchanged for older versions. The desktop treats the browsers as one connection, "Gooti browsers", with the normal trust levels. Default: **Basic** (sensitive kinds ask on the desktop). |
-| Layout | Wide window (about 1100 × 720, minimum 800 × 560) with a sidebar: Identities, Connections, Activity, Settings. Approval and connect windows stay small. |
+| Layout | Wide window (about 1100 × 720, minimum 800 × 400; a tiling window manager such as Hyprland ignores the minimum and cuts off the rest) with a sidebar: Identities, Connections, Activity, Settings. Approval and connect windows stay small. |
 | Platforms | Linux first: AppImage, deb, rpm, AUR. Windows second: an NSIS installer per user, built, tested and released by CI (no Windows machine here; tests also run as Windows binaries under Wine). CI compiles Mac only to catch errors. |
 | Signing | Unsigned alpha. |
 | Relays | Bunker default `wss://relay.getgooti.com` only (relay.nsec.app was dropped: it often timed out). Users can add more. relay.getgooti.com must accept kind 24133 (ephemeral, filtered by `#p`), and optionally NIP-42 AUTH. |
 | License | MIT (since 0.1.2; 0.1.0 and 0.1.1 were released under the Unlicense, as the extension was until it also moved to MIT). |
-| Branches | Work happens on `alpha`. `main` holds releases. |
+| Branches | Work happens on `beta`. `main` holds releases. |
+| AI agents (built 2026-11-24) | Gooti MCP (`../gooti-mcp`) connects an agent like an app. Version 2 gives an agent connection a scope, *This identity only* (default) or *all Desktop only identities and ones it creates*: one ordinary app connection per identity in scope, all with the agent's key; `agents` in `BunkerData` and the desktop record; `gooti_list_identities` and `gooti_create_identity`; Connections → AI assistants (users read "AI assistant"; code says agent). Design and order of work: `../gooti-mcp/docs/DESIGN.md`, "Version 2: agent connections". |
 | Naming (2026-11-12) | In both apps, what the passphrase opens on the relays is the **backup** ("Back up now", "Restore from backup"), never "sync". The local store has no name: "Unlock Gooti", "Gooti password". Custody is "Where the key is used": Browsers and desktops, or Desktop only. Users see one backup; "shared record" and "desktop record" below are names for the docs only. Rules in `CLAUDE.md`. |
 
 ## Design: the desktop record
@@ -65,6 +66,8 @@ only the keys derived from them, so a browser cannot open or replace it. The ext
   - `connections`: connection id → the connection without its last-used time. When two desktops made a
     connection for the same app and identity, the smaller id stays everywhere.
   - `bunkerRelays`: stamped with the time the user set them. Defaults never override another desktop's.
+  - `agents` (Gooti MCP version 2): agent client key → name, scope, home identity, relays and approved
+    time, like the browsers. Disconnect buries the row, and its connections go with it.
 - **Not in it**: window, lock, autostart and update settings; pause; open invites; Activity; last-used times.
 - **Deletions** only for a reason this desktop knows: a connection it revoked or an app that logged out,
   or an identity the shared record deleted. An identity whose shared row has not arrived yet keeps its

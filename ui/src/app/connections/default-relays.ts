@@ -9,7 +9,7 @@ import { CoreService, errorMessage } from '../core/core.service';
   imports: [FormsModule],
   template: `
     <section class="group">
-      <p class="kicker">Default relays for apps</p>
+      <h2 class="section-title"><i class="bi bi-broadcast" aria-hidden="true"></i> Default relays for apps</h2>
       <p class="copy">
         New bunker links and new Desktop only identities start with these relays. Changing them changes nothing
         that is already set up. One relay per line.

@@ -122,6 +122,8 @@ export interface BunkerConnection {
   trust: Trust;
   /** The browsers reaching a Desktop only identity. */
   browsers: boolean;
+  /** One of an AI agent's connections: managed under AI agents. */
+  agent: boolean;
   /** Where this app reaches the desktop. */
   relays: string[];
   /** Another Gooti Desktop answers this app (it answers for the identity), not this one. */
@@ -199,8 +201,18 @@ export interface BunkerAsk {
   connectionId: string;
   identityPubkey: string;
   clientPubkey: string;
-  /** `connect`: a Gooti browser asks to sign through this desktop with its own key. */
-  method: 'sign_event' | 'nip04_encrypt' | 'nip04_decrypt' | 'nip44_encrypt' | 'nip44_decrypt' | 'connect';
+  /**
+   * `connect`: a Gooti browser asks to sign through this desktop with its own key.
+   * `gooti_create_identity`: an AI agent asks for a new Desktop only identity.
+   */
+  method:
+    | 'sign_event'
+    | 'nip04_encrypt'
+    | 'nip04_decrypt'
+    | 'nip44_encrypt'
+    | 'nip44_decrypt'
+    | 'connect'
+    | 'gooti_create_identity';
   params: string[];
   receivedAt: number;
   /**
@@ -218,7 +230,33 @@ export interface BunkerAsk {
     site?: string;
     /** For `connect`: the browser's name and code. */
     browser?: { name: string; code: string };
+    /** For `gooti_create_identity`: the identity the agent asks for. */
+    newIdentity?: { nick: string; color: string | null };
   };
+}
+
+/** Which identities an AI agent may use. Mirrors `gooti_core::bunker::state::AgentScope`. */
+export type AgentScope = 'identity' | 'desktopOnly';
+
+/** Mirrors `gooti_core::bunker::store::AgentInfo`: "AI agents" in Connections. */
+export interface AgentInfo {
+  clientPubkey: string;
+  name: string;
+  url: string | null;
+  scope: AgentScope;
+  /** The identity picked when it connected. */
+  homeIdentityId: string | null;
+  homeNick: string | null;
+  /** The identities it may use now, the home identity first. */
+  identities: { id: string; nick: string; connectionId: string }[];
+  approvedAt: number;
+  lastUsedAt: number | null;
+}
+
+/** A `nostrconnect://` link from Gooti MCP (`gooti=agent`): an AI agent, which gets a scope. */
+export function isAgentLink(link: string): boolean {
+  const query = link.trim().split('?')[1] ?? '';
+  return new URLSearchParams(query).get('gooti') === 'agent';
 }
 
 /** Mirrors `gooti_core::bunker::store::BrowserList`: "Browsers" in Connections. */
@@ -579,9 +617,9 @@ export class CoreService {
     return saved;
   }
 
-  /** Connects the app behind a pasted `nostrconnect://` link. */
-  async bunkerConnect(link: string, identityId: string): Promise<void> {
-    await this.#call('bunker_connect', { link, identityId });
+  /** Connects the app behind a pasted `nostrconnect://` link. `scope` is for an AI agent's link. */
+  async bunkerConnect(link: string, identityId: string, scope: AgentScope = 'identity'): Promise<void> {
+    await this.#call('bunker_connect', { link, identityId, scope });
     this.#bunkerChanged();
   }
 
@@ -617,6 +655,32 @@ export class CoreService {
   async bunkerRevoke(connectionId: string): Promise<void> {
     await this.#call('bunker_revoke', { connectionId });
     this.#bunkerChanged();
+  }
+
+  /** "AI agents" in Connections. */
+  bunkerAgents(): Promise<AgentInfo[]> {
+    return this.#call('bunker_agents');
+  }
+
+  /** Its connections follow at once, on every Gooti Desktop. */
+  async bunkerAgentSetScope(clientPubkey: string, scope: AgentScope): Promise<AgentInfo[]> {
+    const list = await this.#call<AgentInfo[]>('bunker_agent_set_scope', { clientPubkey, scope });
+    this.#bunkerChanged();
+    return list;
+  }
+
+  /** The name Gooti shows for it, on every Gooti Desktop. */
+  async bunkerAgentRename(clientPubkey: string, name: string): Promise<AgentInfo[]> {
+    const list = await this.#call<AgentInfo[]>('bunker_agent_rename', { clientPubkey, name });
+    this.#bunkerChanged();
+    return list;
+  }
+
+  /** Its key stops working for every identity, on every Gooti Desktop. */
+  async bunkerAgentDisconnect(clientPubkey: string): Promise<AgentInfo[]> {
+    const list = await this.#call<AgentInfo[]>('bunker_agent_disconnect', { clientPubkey });
+    this.#bunkerChanged();
+    return list;
   }
 
   /** "Browsers" in Connections. */

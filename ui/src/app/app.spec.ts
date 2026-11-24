@@ -117,8 +117,32 @@ describe('App', () => {
 
   describe('sidebar numbers', () => {
     const nav = (root: HTMLElement, path: string) => root.querySelector<HTMLElement>(`[data-nav="${path}"]`)!;
-    const app = (id: string) => ({ id }) as BunkerConnection;
+    const app = (id: string) => ({ id, clientPubkey: id, browsers: false, agent: false }) as BunkerConnection;
     const relay = (url: string, state: RelayStatus['state']): RelayStatus => ({ url, state });
+
+    it('counts each AI assistant and browser once, not its connection per identity', async () => {
+      const fixture = await render();
+      const root = fixture.nativeElement as HTMLElement;
+      const conn = (id: string, clientPubkey: string, kind: Partial<BunkerConnection> = {}) =>
+        ({ id, clientPubkey, browsers: false, agent: false, ...kind }) as BunkerConnection;
+      core.bunkerState.set({
+        relays: [],
+        linkRelays: [],
+        paused: false,
+        relayStatus: [],
+        connections: [
+          conn('app', 'k-app'),
+          conn('claude-1', 'k-claude', { agent: true }),
+          conn('claude-2', 'k-claude', { agent: true }),
+          conn('grok-1', 'k-grok', { agent: true }),
+          conn('grok-2', 'k-grok', { agent: true }),
+          conn('firefox-1', 'k-firefox', { browsers: true }),
+          conn('firefox-2', 'k-firefox', { browsers: true }),
+        ],
+      });
+      await settle(fixture);
+      expect(nav(root, 'connections').querySelector('.total')?.textContent?.trim()).toBe('4');
+    });
 
     it('counts identities and follows changes, such as a backup bringing one in', async () => {
       core.identities.set([{ ...ALICE }]);
@@ -212,6 +236,14 @@ describe('App', () => {
     core.connectLink.set('nostrconnect://abc?secret=x');
     await settle(fixture);
     expect(router.url).toBe('/connections/new');
+  });
+
+  it('opens Connect an AI assistant when a link from Gooti MCP arrives', async () => {
+    const fixture = await render();
+    const router = TestBed.inject(Router);
+    core.connectLink.set('nostrconnect://abc?secret=x&gooti=agent');
+    await settle(fixture);
+    expect(router.url).toBe('/connections/agent');
   });
 
   it('opens pages with Ctrl+1 … Ctrl+6 and asks to lock with Ctrl+L', async () => {

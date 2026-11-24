@@ -2,6 +2,8 @@ import { signal } from '@angular/core';
 import { vi } from 'vitest';
 import {
   ActivityEntry,
+  AgentInfo,
+  AgentScope,
   BunkerAsk,
   BunkerInfo,
   ConnectionDetail,
@@ -167,6 +169,20 @@ export class FakeCore {
   bunkerRevoke = vi.fn(async (id: string) => {
     this.bunker = { ...this.bunker, connections: this.bunker.connections.filter((c) => c.id !== id) };
   });
+  agentList: AgentInfo[] = [];
+  bunkerAgents = vi.fn(async () => this.agentList);
+  bunkerAgentSetScope = vi.fn(async (clientPubkey: string, scope: AgentScope) => {
+    this.agentList = this.agentList.map((a) => (a.clientPubkey === clientPubkey ? { ...a, scope } : a));
+    return this.agentList;
+  });
+  bunkerAgentRename = vi.fn(async (clientPubkey: string, name: string) => {
+    this.agentList = this.agentList.map((a) => (a.clientPubkey === clientPubkey ? { ...a, name: name.trim() } : a));
+    return this.agentList;
+  });
+  bunkerAgentDisconnect = vi.fn(async (clientPubkey: string) => {
+    this.agentList = this.agentList.filter((a) => a.clientPubkey !== clientPubkey);
+    return this.agentList;
+  });
   browserList: BrowserList = { browsers: [] };
   bunkerBrowsers = vi.fn(async () => this.browserList);
   bunkerBrowserDisconnect = vi.fn(async (clientPubkey: string) => {
@@ -232,6 +248,7 @@ export const CONNECTION = {
   lastUsedAt: null,
   trust: 'ask' as const,
   browsers: false,
+  agent: false,
   relays: ['wss://relay.getgooti.com'],
   servedElsewhere: false,
 };

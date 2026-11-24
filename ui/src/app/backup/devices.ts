@@ -33,7 +33,7 @@ export function removeMessage(device: Pick<DeviceRow, 'name' | 'app'>): string {
   imports: [FormsModule],
   template: `
     <section class="group" aria-label="Devices">
-      <p class="kicker">Devices</p>
+      <h2 class="section-title"><i class="bi bi-laptop" aria-hidden="true"></i> Devices</h2>
       <p class="copy">
         Each Gooti that uses this backup. Remove one you no longer use from the list: it comes back if it
         backs up again.
