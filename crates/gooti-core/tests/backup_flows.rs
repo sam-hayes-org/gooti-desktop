@@ -1011,6 +1011,89 @@ async fn an_approved_browser_and_its_disconnect_reach_a_restored_desktop() {
     assert!(!app_names(&after).contains(&"Work laptop".to_string()));
 }
 
+#[tokio::test]
+async fn an_agent_its_scope_and_its_disconnect_reach_a_restored_desktop() {
+    use gooti_core::bunker::state::AgentScope;
+    let relays = MemoryRelays::default();
+    let phrase = phrase();
+    let before = backed_up(&relays, &phrase).await;
+    let bob = find(&identities(&before), "Bob").clone();
+    let agent = nostr::key::Keys::generate().public_key().to_hex();
+    let link = format!(
+        "nostrconnect://{agent}?relay=wss%3A%2F%2Fagent.relay&secret=s&name=Claude&gooti=agent"
+    );
+    before
+        .gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_accept_nostrconnect_scoped(&link, &bob.id, AgentScope::DesktopOnly)
+        .unwrap();
+    before.backup_runner.back_up_now().await.unwrap();
+
+    // Restored elsewhere: the agent comes back with its scope, for Bob and Alice (Desktop only).
+    let after = Desktop::new(&relays);
+    after
+        .backup_runner
+        .restore_new_vault("1234", &phrase, &[RELAY.into()])
+        .await
+        .unwrap();
+    let agents = |desktop: &Desktop| {
+        desktop
+            .gooti
+            .lock()
+            .unwrap()
+            .vault()
+            .bunker_agents()
+            .unwrap()
+    };
+    let restored = agents(&after);
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].scope, AgentScope::DesktopOnly);
+    let mut nicks: Vec<String> = restored[0]
+        .identities
+        .iter()
+        .map(|i| i.nick.clone())
+        .collect();
+    nicks.sort();
+    assert_eq!(nicks, ["Alice", "Bob"]);
+    // One connection per identity, not one from each desktop.
+    let claude = app_names(&after).iter().filter(|n| *n == "Claude").count();
+    assert_eq!(claude, 2);
+
+    // Renamed on the first desktop: the second shows the new name, on its connections too.
+    before
+        .gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_rename_agent(&agent, "Claude on the laptop")
+        .unwrap();
+    before.backup_runner.back_up_now().await.unwrap();
+    after.backup_runner.back_up_now().await.unwrap();
+    assert_eq!(agents(&after)[0].name, "Claude on the laptop");
+    assert_eq!(
+        app_names(&after)
+            .iter()
+            .filter(|n| *n == "Claude on the laptop")
+            .count(),
+        2
+    );
+
+    // Disconnected on the first desktop: gone on the second after both back up.
+    before
+        .gooti
+        .lock()
+        .unwrap()
+        .vault_mut()
+        .bunker_disconnect_agent(&agent)
+        .unwrap();
+    before.backup_runner.back_up_now().await.unwrap();
+    after.backup_runner.back_up_now().await.unwrap();
+    assert!(agents(&after).is_empty());
+    assert!(!app_names(&after).contains(&"Claude on the laptop".to_string()));
+}
+
 /// Allow on a browser's request, as if pressed on the desktop: a browser with its own key.
 fn allow_browser(desktop: &Desktop, identity_pubkey: &str) {
     use gooti_core::bunker::handler::{Ask, AskDetails, BROWSER_CONNECT, BrowserAsk};
@@ -1098,6 +1181,7 @@ async fn what_gooti_desktop_0_1_4_writes_settles_after_one_backup() {
             trust: Trust::Basic,
             rules: Vec::new(),
             browsers: true,
+            agent: false,
         },
         1.0,
     );

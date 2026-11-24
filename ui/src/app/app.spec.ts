@@ -214,6 +214,14 @@ describe('App', () => {
     expect(router.url).toBe('/connections/new');
   });
 
+  it('opens Connect an AI assistant when a link from Gooti MCP arrives', async () => {
+    const fixture = await render();
+    const router = TestBed.inject(Router);
+    core.connectLink.set('nostrconnect://abc?secret=x&gooti=agent');
+    await settle(fixture);
+    expect(router.url).toBe('/connections/agent');
+  });
+
   it('opens pages with Ctrl+1 … Ctrl+6 and asks to lock with Ctrl+L', async () => {
     const fixture = await render();
     const router = TestBed.inject(Router);

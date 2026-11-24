@@ -6,6 +6,7 @@ import { ActivityPage } from './activity/activity.page';
 import { ConnectionPage } from './connections/connection.page';
 import { ConnectionsPage } from './connections/connections.page';
 import { ConnectionNewPage } from './connections/connection-new.page';
+import { AgentConnectPage } from './connections/agent-connect.page';
 import { SettingsPage } from './settings/settings.page';
 import { BackupPage } from './backup/backup.page';
 import { InfoPage } from './info/info.page';
@@ -20,6 +21,7 @@ export const routes: Routes = [
   { path: 'backup', component: BackupPage, title: 'Backup · Gooti' },
   { path: 'connections', component: ConnectionsPage, title: 'Connections · Gooti' },
   { path: 'connections/new', component: ConnectionNewPage, title: 'Connect new app · Gooti' },
+  { path: 'connections/agent', component: AgentConnectPage, title: 'Connect an AI assistant · Gooti' },
   { path: 'connections/:id', component: ConnectionPage, title: 'App · Gooti' },
   { path: 'activity', component: ActivityPage, title: 'Activities · Gooti' },
   { path: 'settings', component: SettingsPage, title: 'Settings · Gooti' },

@@ -19,6 +19,7 @@ import { ApprovalPanel } from './approval-panel';
 import { ConnectionPage } from './connection.page';
 import { ConnectionsPage } from './connections.page';
 import { ConnectionNewPage } from './connection-new.page';
+import { AgentConnectPage } from './agent-connect.page';
 
 describe('ConnectionsPage', () => {
   let core: FakeCore;
@@ -50,6 +51,56 @@ describe('ConnectionsPage', () => {
     await settle(fixture);
     expect(core.bunkerRevoke).toHaveBeenCalledWith('c1');
     expect(text(root)).toContain('No app yet');
+  });
+
+  it('lists AI agents apart from the apps, widens one after asking, and disconnects it', async () => {
+    core.bunker.connections = [{ ...CONNECTION, id: 'a1', name: 'Claude via Gooti MCP', agent: true }];
+    core.agentList = [{
+      clientPubkey: 'c1d2e3f4'.repeat(8),
+      name: 'Claude via Gooti MCP',
+      url: 'https://mcp-test.getgooti.com',
+      scope: 'identity' as const,
+      homeIdentityId: 'alice',
+      homeNick: 'Alice',
+      identities: [{ id: 'alice', nick: 'Alice', connectionId: 'a1' }],
+      approvedAt: 0,
+      lastUsedAt: null,
+    }];
+    const { fixture, root } = await render();
+    expect(text(root)).toContain('No app yet');
+    const card = root.querySelector<HTMLElement>('[data-agent]')!;
+    expect(text(card)).toContain('Claude via Gooti MCP');
+    expect(text(card)).toContain('Alice');
+    expect(selectLabel(root, 'scope-' + core.agentList[0].clientPubkey)).toBe('Only Alice');
+
+    button(root, 'Rename').click();
+    await settle(fixture);
+    const field = root.querySelector<HTMLInputElement>('input[name="agentName"]')!;
+    expect(field.value).toBe('Claude via Gooti MCP');
+    field.value = 'Claude on the laptop';
+    field.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    button(root, 'Save').click();
+    await settle(fixture);
+    expect(core.bunkerAgentRename).toHaveBeenCalledWith(core.agentList[0].clientPubkey, 'Claude on the laptop');
+    expect(text(root.querySelector<HTMLElement>('[data-agent]')!)).toContain('Claude on the laptop');
+    expect(root.querySelector('input[name="agentName"]')).toBeNull();
+
+    const confirm = TestBed.inject(ConfirmService);
+    const id = 'scope-' + core.agentList[0].clientPubkey;
+    await choose(fixture, root, id, 'Alice and all Desktop only identities');
+    expect(confirm.pending()?.message).toContain('Let Claude on the laptop use all your Desktop only identities');
+    confirm.answer(true);
+    await settle(fixture);
+    expect(core.bunkerAgentSetScope).toHaveBeenCalledWith(core.agentList[0].clientPubkey, 'desktopOnly');
+    expect(selectLabel(root, id)).toBe('Alice and all Desktop only identities');
+
+    button(root, 'Disconnect').click();
+    expect(confirm.pending()?.message).toContain('Disconnect Claude on the laptop?');
+    confirm.answer(true);
+    await settle(fixture);
+    expect(core.bunkerAgentDisconnect).toHaveBeenCalled();
+    expect(text(root)).toContain('No AI agent yet');
   });
 
   it('lists the browsers apart from the apps, with no Remove for them', async () => {
@@ -186,6 +237,17 @@ describe('ConnectionNewPage', () => {
     expect(navigate).toHaveBeenCalledWith('/connections', { state: { notice: 'The app is connected.' } });
   });
 
+  it('sends a pasted AI assistant link to its own page', async () => {
+    const { fixture, root, navigate } = await render();
+    button(root, 'Paste nostrconnect link').click();
+    await settle(fixture);
+    const link = 'nostrconnect://abc?relay=wss://r&secret=x&name=Claude&gooti=agent';
+    setTextarea(root, 'textarea[name="nostrconnect"]', link);
+    await settle(fixture);
+    expect(navigate).toHaveBeenCalledWith('/connections/agent', { state: { link } });
+    expect(core.bunkerConnect).not.toHaveBeenCalled();
+  });
+
   it('goes back to Connections once an app uses the bunker link', async () => {
     const { fixture, root, navigate } = await render();
     button(root, 'Show bunker link').click();
@@ -250,6 +312,27 @@ describe('ApprovalPanel', () => {
     await settle(fixture);
     return { fixture, root: fixture.nativeElement as HTMLElement };
   }
+
+  it('asks before an AI agent creates an identity, without remembering', async () => {
+    core.bunker.connections = [{ ...CONNECTION, id: 'a1', name: 'Claude via Gooti MCP', agent: true }];
+    core.pendingAsks.set([
+      {
+        ...ASK,
+        connectionId: 'a1',
+        method: 'gooti_create_identity',
+        params: ['Petra', '#3b82f6'],
+        details: { ...ASK.details, kind: null, content: null, tags: [], newIdentity: { nick: 'Petra', color: '#3b82f6' } },
+      },
+    ]);
+    const { fixture, root } = await render();
+    expect(text(root)).toContain('Create a new identity?');
+    expect(root.querySelector('.who .app')?.textContent).toBe('Claude via Gooti MCP');
+    expect(text(root)).toContain('Petra');
+    expect(root.querySelector('#remember')).toBeNull();
+    button(root, 'Create').click();
+    await settle(fixture);
+    expect(core.bunkerDecide).toHaveBeenCalledWith('k1', true, 'once');
+  });
 
   it('shows the oldest request and approves it, remembered as chosen', async () => {
     core.pendingAsks.set([ASK, { ...ASK, key: 'k2' }]);
@@ -474,5 +557,69 @@ describe('ConnectionPage', () => {
     other.componentRef.setInput('id', 'c1');
     await settle(other);
     expect((other.nativeElement as HTMLElement).querySelector('.slow-sites')).toBeNull();
+  });
+});
+
+describe('AgentConnectPage', () => {
+  let core: FakeCore;
+  const LINK =
+    'nostrconnect://abc?relay=wss%3A%2F%2Ftest.getgooti.com&secret=x&name=Claude%20Code%20(gooti)%20via%20Gooti%20MCP&url=https%3A%2F%2Fmcp-test.getgooti.com&gooti=agent';
+
+  beforeEach(() => {
+    core = new FakeCore();
+    core.identities.set([
+      ALICE,
+      { ...ALICE, id: 'work', nick: 'Work', custody: 'desktop' },
+      { ...ALICE, id: 'jane', nick: 'Jane', custody: 'desktop' },
+    ]);
+    TestBed.configureTestingModule({ providers: [provideRouter([]), provideFakeCore(core)] });
+  });
+
+  async function render() {
+    const fixture = TestBed.createComponent(AgentConnectPage);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    await settle(fixture);
+    return { fixture, root: fixture.nativeElement as HTMLElement, navigate };
+  }
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('shows who asks and what the wider scope covers, then connects with the scope chosen', async () => {
+    core.connectLink.set(LINK);
+    const { fixture, root, navigate } = await render();
+    expect(core.connectLink()).toBeNull();
+    const who = root.querySelector<HTMLElement>('[data-agent-who]')!;
+    expect(text(who)).toContain('Claude Code (gooti) via Gooti MCP');
+    expect(text(who)).toContain('through Gooti MCP · mcp-test.getgooti.com');
+    expect(selectLabel(root, 'identity')).toBe('Alice');
+    const scope = root.querySelector<HTMLElement>('[data-scope]')!;
+    expect(text(scope)).toContain('Only Alice');
+    expect(text(scope)).toContain('Alice and all Desktop only identities (Work, Jane)');
+    expect(root.querySelector('textarea')).toBeNull();
+    expect(text(root)).not.toContain('bunker link');
+
+    root.querySelector<HTMLInputElement>('input[value="desktopOnly"]')!.click();
+    await settle(fixture);
+    button(root, 'Connect').click();
+    await settle(fixture);
+    expect(core.bunkerConnect).toHaveBeenCalledWith(LINK, 'alice', 'desktopOnly');
+    expect(navigate).toHaveBeenCalledWith('/connections', {
+      state: { notice: 'The AI assistant is connected. It is listed under AI agents.' },
+    });
+  });
+
+  it('leaves the default identity out of what the wider scope adds', async () => {
+    core.connectLink.set(LINK);
+    const { fixture, root } = await render();
+    await choose(fixture, root, 'identity', 'Work');
+    const scope = root.querySelector<HTMLElement>('[data-scope]')!;
+    expect(text(scope)).toContain('Only Work');
+    expect(text(scope)).toContain('Work and all Desktop only identities (Jane)');
+  });
+
+  it('says so when no AI assistant is asking', async () => {
+    const { root } = await render();
+    expect(text(root)).toContain('No AI assistant is asking');
+    expect(root.querySelector('[data-scope]')).toBeNull();
   });
 });

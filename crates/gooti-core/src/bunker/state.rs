@@ -59,7 +59,57 @@ pub struct BunkerData {
     /// for every browser; missing is Basic.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub browser_trust: std::collections::BTreeMap<String, Trust>,
+    /// AI agents that connected through Gooti MCP, each with its scope (gooti-mcp
+    /// `docs/DESIGN.md`, "Version 2: agent connections"). Each has one ordinary connection per
+    /// identity in its scope, all with its key (`sync_agents`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<Agent>,
+    /// Agents disconnected here since the desktop record last saw them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_agents: Vec<String>,
 }
+
+/// Which identities an agent may use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentScope {
+    /// Only the identity picked when it connected.
+    #[default]
+    Identity,
+    /// That identity, every Desktop only identity, and the ones the agent creates.
+    DesktopOnly,
+}
+
+/// An AI agent connected through Gooti MCP. Approving its `nostrconnect://` link is the consent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Agent {
+    /// The agent's NIP-46 key; the same for every identity.
+    pub client_pubkey: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The identity picked when it connected. Gooti's own methods reach the desktop through it.
+    pub home_pubkey: String,
+    #[serde(default)]
+    pub scope: AgentScope,
+    /// Where the agent listens: every one of its connections uses these.
+    pub relays: Vec<String>,
+    pub approved_at: i64,
+}
+
+impl Agent {
+    /// Whether the agent may use this identity, given the Desktop only identities.
+    pub fn covers(&self, identity_pubkey: &str, desktop_only: &[String]) -> bool {
+        identity_pubkey == self.home_pubkey
+            || (self.scope == AgentScope::DesktopOnly
+                && desktop_only.iter().any(|p| p == identity_pubkey))
+    }
+}
+
+/// What a `nostrconnect://` link from Gooti MCP carries (`gooti=agent`): the desktop asks for a
+/// scope and lists the agent under AI agents.
+pub const AGENT_HINT: &str = "agent";
 
 /// A browser that asked to sign through this desktop with its own key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,6 +189,8 @@ impl Default for BunkerData {
             retired_shared_keys: Vec::new(),
             browser_relays: Default::default(),
             browser_trust: Default::default(),
+            agents: Vec::new(),
+            removed_agents: Vec::new(),
         }
     }
 }
@@ -206,6 +258,72 @@ impl BunkerData {
         true
     }
 
+    pub fn agent(&self, client_pubkey: &str) -> Option<&Agent> {
+        self.agents
+            .iter()
+            .find(|a| a.client_pubkey == client_pubkey)
+    }
+
+    /// Gives each agent exactly one connection per identity in its scope: adds the missing ones
+    /// (they start at Ask every time) and ends those it no longer covers. `desktop_only` are
+    /// the Desktop only identities this desktop holds the key of. Returns whether anything changed.
+    pub fn sync_agents(&mut self, desktop_only: &[String], now: i64) -> bool {
+        let mut changed = false;
+        let agents = self.agents.clone();
+        for agent in &agents {
+            let ended: Vec<String> = self
+                .connections
+                .iter()
+                .filter(|c| {
+                    c.client_pubkey == agent.client_pubkey
+                        && !agent.covers(&c.identity_pubkey, desktop_only)
+                })
+                .map(|c| c.id.clone())
+                .collect();
+            if !ended.is_empty() {
+                self.connections.retain(|c| !ended.contains(&c.id));
+                self.removed.extend(ended);
+                changed = true;
+            }
+            let wanted = std::iter::once(agent.home_pubkey.clone()).chain(
+                desktop_only
+                    .iter()
+                    .filter(|_| agent.scope == AgentScope::DesktopOnly)
+                    .cloned(),
+            );
+            for identity in wanted {
+                if self.connections.iter().any(|c| {
+                    c.client_pubkey == agent.client_pubkey && c.identity_pubkey == identity
+                }) {
+                    continue;
+                }
+                self.connections
+                    .push(agent_connection(agent, &identity, now));
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Ends an agent: its connections for every identity, here and on the other desktops.
+    /// Returns the connections it had.
+    pub fn remove_agent(&mut self, client_pubkey: &str) -> Vec<Connection> {
+        let ended: Vec<Connection> = self
+            .connections
+            .iter()
+            .filter(|c| c.client_pubkey == client_pubkey)
+            .cloned()
+            .collect();
+        self.connections
+            .retain(|c| c.client_pubkey != client_pubkey);
+        self.removed.extend(ended.iter().map(|c| c.id.clone()));
+        if self.agents.iter().any(|a| a.client_pubkey == client_pubkey) {
+            self.agents.retain(|a| a.client_pubkey != client_pubkey);
+            self.removed_agents.push(client_pubkey.to_string());
+        }
+        ended
+    }
+
     pub fn browser(&self, client_pubkey: &str) -> Option<&BrowserDevice> {
         self.browsers
             .iter()
@@ -216,6 +334,16 @@ impl BunkerData {
         self.signers.retain(|s| keep(&s.identity_pubkey));
         self.invites.retain(|i| keep(&i.identity_pubkey));
         self.connections.retain(|c| keep(&c.identity_pubkey));
+        // An agent reaches the desktop through its home identity: without it, it is gone.
+        let gone: Vec<String> = self
+            .agents
+            .iter()
+            .filter(|a| !keep(&a.home_pubkey))
+            .map(|a| a.client_pubkey.clone())
+            .collect();
+        for client in gone {
+            self.remove_agent(&client);
+        }
         self.browser_relays.retain(|pubkey, _| keep(pubkey));
         self.browser_trust.retain(|pubkey, _| keep(pubkey));
     }
@@ -311,6 +439,9 @@ pub struct Connection {
     /// A browser's connection (its own key) for a Desktop only identity.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub browsers: bool,
+    /// One of an AI agent's connections (`BunkerData::agents`). Managed with the agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent: bool,
 }
 
 /// Name, URL and icon an app sends with `connect`. Display hints only.
@@ -341,5 +472,26 @@ impl ClientMeta {
             image: field("image"),
             gooti: field("gooti"),
         }
+    }
+}
+
+/// An agent's connection for one identity, as it starts.
+pub fn agent_connection(agent: &Agent, identity_pubkey: &str, now: i64) -> Connection {
+    Connection {
+        id: uuid::Uuid::new_v4().to_string(),
+        identity_pubkey: identity_pubkey.to_string(),
+        client_pubkey: agent.client_pubkey.clone(),
+        relays: agent.relays.clone(),
+        name: Some(agent.name.clone()),
+        url: agent.url.clone(),
+        image: None,
+        perms: None,
+        created_at: now,
+        last_used_at: None,
+        // Agents start at Ask every time, for every identity.
+        trust: Trust::Ask,
+        rules: Vec::new(),
+        browsers: false,
+        agent: true,
     }
 }

@@ -15,6 +15,7 @@ const TITLES: Record<BunkerAsk['method'], string> = {
   nip04_decrypt: 'Decrypt a message?',
   nip44_decrypt: 'Decrypt a message?',
   connect: 'Allow this browser?',
+  gooti_create_identity: 'Create a new identity?',
 };
 
 export const REMEMBER_CHOICES: { value: Remember; label: string; longer: boolean }[] = [

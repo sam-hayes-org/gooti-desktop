@@ -527,6 +527,7 @@ impl Vault {
         unlocked.data.backup = None;
         unlocked.data.desktop_record = None;
         unlocked.data.bunker.removed.clear();
+        unlocked.data.bunker.removed_agents.clear();
         self.save_change()
     }
 
@@ -816,8 +817,10 @@ impl Vault {
         })
     }
 
-    /// Re-seals the data and keeps the password part of the file.
+    /// Re-seals the data and keeps the password part of the file. AI agents' connections follow
+    /// the identities first (`sync_agents`), so a new, deleted or moved identity is covered.
     pub(crate) fn save(&mut self) -> Result<()> {
+        self.sync_agents()?;
         let mut file = self.read_file()?;
         file.data = seal_data(self.unlocked()?);
         write_atomic(&self.path, &file_bytes(&file))?;

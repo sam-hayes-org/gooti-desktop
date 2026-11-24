@@ -91,6 +91,75 @@
       </label>
     </section>
 
+    <section class="group" aria-label="AI agents">
+      <p class="kicker">AI agents</p>
+      <p class="copy">
+        AI assistants such as Claude, connected through Gooti MCP. Each one uses the identities you allow it.
+        Gooti asks you before it signs anything, and before it creates an identity.
+      </p>
+      @if (agents(); as list) {
+        @for (agent of list; track agent.clientPubkey) {
+          <div class="sam-card agent-card" data-agent>
+            @if (renaming() === agent.clientPubkey) {
+              <form class="rename" (submit)="$event.preventDefault(); saveName(agent)">
+                <div class="sam-field grow">
+                  <input
+                    type="text"
+                    name="agentName"
+                    aria-label="Name"
+                    autocomplete="off"
+                    maxlength="80"
+                    [ngModel]="newName()"
+                    (ngModelChange)="newName.set($event)"
+                  />
+                </div>
+                <button type="submit" class="action primary" [disabled]="!newName().trim() || busy()">Save</button>
+                <button type="button" class="action quiet" (click)="renaming.set(null)">Cancel</button>
+              </form>
+            } @else {
+              <div class="agent-head">
+                <div class="app-text">
+                  <span class="app-name"><i class="bi bi-robot"></i> {{ agent.name }}</span>
+                  <span class="copy">
+                    Connected {{ when(agent.approvedAt) }} · Last used: {{ when(agent.lastUsedAt) }}
+                  </span>
+                </div>
+                <div class="row-buttons">
+                  <button type="button" class="action quiet" [disabled]="busy()" (click)="startRename(agent)">
+                    Rename
+                  </button>
+                  <button type="button" class="action quiet" [disabled]="busy()" (click)="disconnectAgent(agent)">
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            }
+            <label class="field-label" [attr.for]="'scope-' + agent.clientPubkey">May use</label>
+            <app-select
+              class="scope-select"
+              [inputId]="'scope-' + agent.clientPubkey"
+              [options]="scopeOptions(agent)"
+              [ngModel]="agent.scope"
+              (ngModelChange)="setAgentScope(agent, $event)"
+            />
+            <div class="agent-identities">
+              @for (identity of agent.identities; track identity.connectionId) {
+                <a class="identity-chip" [routerLink]="['/connections', identity.connectionId]">
+                  {{ identity.nick }} <i class="bi bi-chevron-right"></i>
+                </a>
+              }
+            </div>
+            <span class="copy">Open an identity to set how far {{ agent.name }} may go without asking.</span>
+          </div>
+        } @empty {
+          <div class="sam-card empty-card">
+            <p class="title">No AI agent yet</p>
+            <p class="copy">An AI assistant connects through Gooti MCP. It shows up here once you allow it.</p>
+          </div>
+        }
+      }
+    </section>
+
     <section class="group" aria-label="Browsers">
       <p class="kicker">Browsers</p>
       <p class="copy">

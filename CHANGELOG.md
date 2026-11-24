@@ -5,6 +5,13 @@ does in full is in `README.md`.
 
 ## Unreleased
 
+- Apps: an error reply carries a stable `code` next to the error text (`not_connected`, `rejected`,
+  `timed_out`, `paused`, and more; list in `README.md`), so programs no longer have to match the
+  text. The texts stay the same, and apps that do not know the code ignore it.
+- Apps: a disconnected app now learns so on the relay it uses. The answer to a client without a
+  connection went only to the identity's browser relays; now it goes to the relays of the identity's
+  apps too.
+
 ## 0.2.0 (2026-11-20)
 
 - **Update every Gooti Desktop that uses your passphrase.** Gooti Desktop 0.1.4 still hands out the

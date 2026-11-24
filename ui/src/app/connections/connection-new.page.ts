@@ -2,7 +2,7 @@ import { Component, OnInit, computed, effect, inject, signal, untracked } from '
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { relaysFromText, relaysToText } from '../backup/relays';
-import { CoreService, errorMessage } from '../core/core.service';
+import { CoreService, errorMessage, isAgentLink } from '../core/core.service';
 import { CopyButton } from '../shared/copy-button';
 import { Select, SelectOption } from '../shared/select';
 import { QrCode } from './qr-code';
@@ -30,6 +30,7 @@ export class ConnectionNewPage implements OnInit {
   /** Set when a clicked link filled in the page. */
   protected readonly fromLink = signal(false);
   protected readonly relaysText = signal('');
+
   /** The apps there were when the link was shown. A new one for the identity means it connected. */
   #before: Set<string> | null = null;
 
@@ -49,6 +50,16 @@ export class ConnectionNewPage implements OnInit {
           this.showPaste();
           this.pasted.set(link);
           this.fromLink.set(true);
+        });
+      }
+    });
+    effect(() => {
+      // An AI assistant's link pasted here has a page of its own.
+      const pasted = this.pasted();
+      if (isAgentLink(pasted)) {
+        untracked(() => {
+          this.pasted.set('');
+          void this.#router.navigateByUrl('/connections/agent', { state: { link: pasted.trim() } });
         });
       }
     });

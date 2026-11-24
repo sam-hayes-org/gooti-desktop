@@ -172,6 +172,11 @@ export const TRUST_CHOICES: { value: Trust; label: string; copy: string }[] = [
             This is how {{ detail.name }} reaches {{ detail.identityNick }}, whose key stays on this
             desktop. To end it, disconnect the browser under Connections → Browsers.
           </p>
+        } @else if (detail.agent) {
+          <p class="copy">
+            {{ detail.name }} is an AI agent. It uses {{ detail.identityNick }} as long as its scope covers
+            it. To change the scope or end it, go to Connections → AI agents.
+          </p>
         } @else {
           <section class="group">
             <p class="kicker danger">Danger zone</p>

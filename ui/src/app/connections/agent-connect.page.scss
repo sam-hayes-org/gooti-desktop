@@ -1,0 +1,97 @@
+.agent-who {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+
+  > i {
+    font-size: 26px;
+  }
+
+  .who-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .host {
+    white-space: nowrap;
+  }
+
+  .who-name {
+    font-size: 17px;
+    font-weight: 600;
+  }
+}
+
+.connect-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.select {
+  min-width: 200px;
+}
+
+fieldset.scope {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+
+  legend {
+    padding: 0;
+    margin-bottom: 6px;
+  }
+}
+
+// A choice as a card: the whole card is the label.
+.scope-card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+
+  &.chosen {
+    border-color: rgba(13, 110, 253, 0.7);
+  }
+
+  input {
+    margin-top: 4px;
+  }
+
+  .choice-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .choice-label {
+    font-size: 15px;
+  }
+
+  .covers {
+    color: var(--muted);
+  }
+}
+
+.show-link {
+  font-size: 13px;
+
+  summary {
+    cursor: pointer;
+    color: var(--muted);
+  }
+
+  .link-text {
+    margin: 8px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    word-break: break-all;
+  }
+}

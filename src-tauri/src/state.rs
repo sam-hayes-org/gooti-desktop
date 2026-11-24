@@ -132,6 +132,11 @@ impl AppState {
             Notice::Relays => {
                 let _ = app.emit(BUNKER_RELAYS_EVENT, ());
             }
+            Notice::Identities => {
+                // An AI agent's new identity: show it, and take it into backup.
+                let _ = app.emit(VAULT_CHANGED_EVENT, ());
+                state.kick_backup(&app);
+            }
         });
         *slot = Some(in_runtime(|| {
             BunkerService::start(Arc::clone(&self.gooti), notify)
@@ -345,7 +350,7 @@ pub fn emit_status<R: Runtime>(app: &AppHandle<R>, status: VaultStatus) {
 
 /// Runs `work` inside Tauri's tokio runtime, so it may spawn tasks. Commands that are not
 /// `async` run on the main thread, outside of it.
-fn in_runtime<T>(work: impl FnOnce() -> T) -> T {
+pub(crate) fn in_runtime<T>(work: impl FnOnce() -> T) -> T {
     let handle = tauri::async_runtime::handle();
     let _guard = handle.inner().enter();
     work()

@@ -113,3 +113,57 @@
 .hint {
   color: #f0c36d;
 }
+
+// An AI agent: its name and Disconnect, what it may use, and its identities.
+.agent-card {
+  gap: 8px;
+
+  .agent-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .rename {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .grow {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .scope-select {
+    max-width: 420px;
+  }
+
+  .agent-identities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .identity-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font-size: 13px;
+    text-decoration: none;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    i {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+  }
+}

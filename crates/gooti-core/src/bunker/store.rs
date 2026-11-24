@@ -3,19 +3,23 @@
 use nostr::key::{Keys, SecretKey};
 use serde::Serialize;
 
-use super::handler::{self, Ask, Outcome};
-use super::message::Incoming;
+use super::handler::{
+    self, Ask, AskDetails, GOOTI_CREATE_IDENTITY, GOOTI_LIST_IDENTITIES, NewIdentityAsk, Outcome,
+};
+use super::message::{ErrorCode, Response};
 use super::policy::{Rule, Trust, remember};
 use super::state::{
-    BrowserDevice, Connection, INVITE_LIFETIME_MS, Invite, SignerKey, browser_code, browser_secret,
+    AGENT_HINT, Agent, AgentScope, BrowserDevice, Connection, INVITE_LIFETIME_MS, Invite,
+    SignerKey, agent_connection, browser_code, browser_secret,
 };
 use super::uri::{bunker_uri, parse_nostrconnect};
 use crate::activity::{Activity, ActivityEntry};
 use crate::backup::document::{SharedBunker, is_wss_url};
 use crate::backup::phrase::hex;
+use crate::color::color_for_pubkey;
 use crate::crypto::random_bytes;
 use crate::error::{Error, Result};
-use crate::identity::{BrowserLink, Custody, StoredIdentity};
+use crate::identity::{self, BrowserLink, Custody, NewKey, StoredIdentity};
 use crate::time;
 use crate::vault::{Vault, normalize_relays};
 
@@ -84,6 +88,8 @@ pub struct ConnectionInfo {
     pub trust: Trust,
     /// The browsers reaching a Desktop only identity. Cannot be removed here.
     pub browsers: bool,
+    /// One of an AI agent's connections. Managed under AI agents.
+    pub agent: bool,
     /// Where this app reaches the desktop.
     pub relays: Vec<String>,
     /// Another Gooti Desktop answers this app (it answers for the identity), not this one.
@@ -98,6 +104,44 @@ pub struct ConnectionDetail {
     pub info: ConnectionInfo,
     pub trust: Trust,
     pub rules: Vec<Rule>,
+}
+
+/// "AI agents" in Connections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInfo {
+    pub client_pubkey: String,
+    pub name: String,
+    pub url: Option<String>,
+    pub scope: AgentScope,
+    /// The identity picked when it connected.
+    pub home_identity_id: Option<String>,
+    pub home_nick: Option<String>,
+    /// The identities it may use now, the home identity first.
+    pub identities: Vec<AgentIdentity>,
+    pub approved_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentIdentity {
+    pub id: String,
+    pub nick: String,
+    /// Its connection, for trust and remembered choices.
+    pub connection_id: String,
+}
+
+/// One identity in an agent's scope, as `gooti_list_identities` answers it. The server routes
+/// with `signer` and `relays`; the agent is shown only nick, npub and color.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopedIdentity {
+    pub pubkey: String,
+    pub nick: String,
+    pub color: String,
+    pub signer: String,
+    pub relays: Vec<String>,
 }
 
 /// What the relay pool should do: which relays to hold and which keys to listen for.
@@ -153,6 +197,7 @@ impl Vault {
                     last_used_at: connection.last_used_at,
                     trust: connection.trust,
                     browsers: connection.browsers,
+                    agent: connection.agent,
                     relays: handler::reply_relays(&data.bunker, connection),
                     served_elsewhere: Vault::served_elsewhere(unlocked, &identity.pubkey),
                 })
@@ -219,7 +264,21 @@ impl Vault {
         link: &str,
         identity_id: &str,
     ) -> Result<ConnectReply> {
+        self.bunker_accept_nostrconnect_scoped(link, identity_id, AgentScope::Identity)
+    }
+
+    /// Like `bunker_accept_nostrconnect`. A link from Gooti MCP (`gooti=agent`) connects an AI
+    /// agent with this scope; other apps ignore it.
+    pub fn bunker_accept_nostrconnect_scoped(
+        &mut self,
+        link: &str,
+        identity_id: &str,
+        scope: AgentScope,
+    ) -> Result<ConnectReply> {
         let link = parse_nostrconnect(link)?;
+        if link.gooti.as_deref() == Some(AGENT_HINT) {
+            return self.accept_agent(link, identity_id, scope);
+        }
         let identity = self.signable(identity_id)?;
         let signer = self.signer_for(&identity)?;
         let now = time::now_ms();
@@ -241,6 +300,7 @@ impl Vault {
             trust: Trust::default(),
             rules: Vec::new(),
             browsers: false,
+            agent: false,
         });
         let added = bunker.connections.last().expect("just added");
         let (app, connection_id) = (app_name(added), added.id.clone());
@@ -261,9 +321,250 @@ impl Vault {
         })
     }
 
+    /// An AI agent from Gooti MCP: its home connection now, one per identity in scope with it.
+    fn accept_agent(
+        &mut self,
+        link: super::uri::NostrConnect,
+        identity_id: &str,
+        scope: AgentScope,
+    ) -> Result<ConnectReply> {
+        let identity = self.signable(identity_id)?;
+        let signer = self.signer_for(&identity)?;
+        let now = time::now_ms();
+        let agent = Agent {
+            client_pubkey: link.client_pubkey.clone(),
+            name: link.name.unwrap_or_else(|| "An AI agent".into()),
+            url: link.url,
+            home_pubkey: identity.clone(),
+            scope,
+            relays: link.relays.clone(),
+            approved_at: now,
+        };
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        // The same key connecting again starts over.
+        bunker.remove_agent(&agent.client_pubkey);
+        bunker.removed_agents.retain(|c| *c != agent.client_pubkey);
+        let mut home = agent_connection(&agent, &identity, now);
+        home.last_used_at = Some(now);
+        let connection_id = home.id.clone();
+        bunker.connections.push(home);
+        bunker.agents.push(agent.clone());
+        self.sync_agents()?;
+        self.record_activity(ActivityEntry {
+            at: now,
+            what: Activity::Connected {
+                app: agent.name.clone(),
+                connection_id,
+                identity_pubkey: identity,
+            },
+        });
+        self.save_change()?;
+        Ok(ConnectReply {
+            signer,
+            client_pubkey: link.client_pubkey,
+            relays: link.relays,
+            secret: link.secret,
+        })
+    }
+
+    /// Gives each agent its connections for the identities in its scope now (`BunkerData::sync_agents`).
+    /// Runs before every save, so a new, deleted or moved identity is followed at once.
+    pub(crate) fn sync_agents(&mut self) -> Result<bool> {
+        let unlocked = self.unlocked_mut()?;
+        if unlocked.data.bunker.agents.is_empty() {
+            return Ok(false);
+        }
+        let desktop_only = desktop_only_pubkeys(&unlocked.data.identities);
+        Ok(unlocked
+            .data
+            .bunker
+            .sync_agents(&desktop_only, time::now_ms()))
+    }
+
+    /// "AI agents" in Connections.
+    pub fn bunker_agents(&self) -> Result<Vec<AgentInfo>> {
+        let data = &self.unlocked()?.data;
+        let bunker = &data.bunker;
+        let nick_of = |pubkey: &str| {
+            data.identities
+                .iter()
+                .find(|i| i.pubkey == pubkey)
+                .map(|i| (i.id.clone(), i.nick.clone()))
+        };
+        Ok(bunker
+            .agents
+            .iter()
+            .map(|agent| {
+                let mut connections: Vec<&Connection> = bunker
+                    .connections
+                    .iter()
+                    .filter(|c| c.client_pubkey == agent.client_pubkey)
+                    .collect();
+                // The home identity first, the others by nick.
+                connections.sort_by_key(|c| {
+                    (
+                        c.identity_pubkey != agent.home_pubkey,
+                        nick_of(&c.identity_pubkey).map(|(_, nick)| nick.to_lowercase()),
+                    )
+                });
+                let home = nick_of(&agent.home_pubkey);
+                AgentInfo {
+                    client_pubkey: agent.client_pubkey.clone(),
+                    name: agent.name.clone(),
+                    url: agent.url.clone(),
+                    scope: agent.scope,
+                    home_identity_id: home.as_ref().map(|(id, _)| id.clone()),
+                    home_nick: home.map(|(_, nick)| nick),
+                    identities: connections
+                        .iter()
+                        .filter_map(|c| {
+                            let (id, nick) = nick_of(&c.identity_pubkey)?;
+                            Some(AgentIdentity {
+                                id,
+                                nick,
+                                connection_id: c.id.clone(),
+                            })
+                        })
+                        .collect(),
+                    approved_at: agent.approved_at,
+                    last_used_at: connections.iter().filter_map(|c| c.last_used_at).max(),
+                }
+            })
+            .collect())
+    }
+
+    /// "Change scope": the agent's connections follow at once. Only here, never by the agent.
+    pub fn bunker_set_agent_scope(&mut self, client_pubkey: &str, scope: AgentScope) -> Result<()> {
+        let agent = self
+            .unlocked_mut()?
+            .data
+            .bunker
+            .agents
+            .iter_mut()
+            .find(|a| a.client_pubkey == client_pubkey)
+            .ok_or(Error::AgentNotFound)?;
+        agent.scope = scope;
+        self.sync_agents()?;
+        self.save_change()
+    }
+
+    /// "Rename": the name Gooti shows for this agent, in AI agents, the approval window and new
+    /// Activities entries; older entries keep the name they were made with. Only here, never by the
+    /// agent. At most `AGENT_NAME_MAX` characters.
+    pub fn bunker_rename_agent(&mut self, client_pubkey: &str, name: &str) -> Result<()> {
+        let name: String = name.trim().chars().take(AGENT_NAME_MAX).collect();
+        let name = name.trim_end().to_string();
+        if name.is_empty() {
+            return Err(Error::AgentNameRequired);
+        }
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        let agent = bunker
+            .agents
+            .iter_mut()
+            .find(|a| a.client_pubkey == client_pubkey)
+            .ok_or(Error::AgentNotFound)?;
+        agent.name = name.clone();
+        for connection in bunker
+            .connections
+            .iter_mut()
+            .filter(|c| c.client_pubkey == client_pubkey)
+        {
+            connection.name = Some(name.clone());
+        }
+        self.save_change()
+    }
+
+    /// "Disconnect": the agent's key stops working for every identity, at once. Its next request
+    /// gets `not_connected`, and Gooti MCP signs it out.
+    pub fn bunker_disconnect_agent(&mut self, client_pubkey: &str) -> Result<()> {
+        let now = time::now_ms();
+        let bunker = &mut self.unlocked_mut()?.data.bunker;
+        let name = bunker
+            .agent(client_pubkey)
+            .ok_or(Error::AgentNotFound)?
+            .name
+            .clone();
+        for connection in bunker.remove_agent(client_pubkey) {
+            self.record_activity(ActivityEntry {
+                at: now,
+                what: Activity::Disconnected {
+                    app: name.clone(),
+                    connection_id: connection.id,
+                    identity_pubkey: connection.identity_pubkey,
+                },
+            });
+        }
+        self.save_change()
+    }
+
+    /// The identities an agent may use now, for `gooti_list_identities`.
+    pub fn bunker_scoped_identities(&self, client_pubkey: &str) -> Result<Vec<ScopedIdentity>> {
+        let unlocked = self.unlocked()?;
+        let data = &unlocked.data;
+        let agent = data
+            .bunker
+            .agent(client_pubkey)
+            .ok_or(Error::AgentNotFound)?;
+        let desktop_only = desktop_only_pubkeys(&data.identities);
+        let mut list: Vec<ScopedIdentity> = data
+            .identities
+            .iter()
+            .filter(|i| i.privkey.is_some() && agent.covers(&i.pubkey, &desktop_only))
+            .filter_map(|i| {
+                let signer = served_signer(unlocked, &i.pubkey)?;
+                Some(ScopedIdentity {
+                    pubkey: i.pubkey.clone(),
+                    nick: i.nick.clone(),
+                    color: color_for_pubkey(&i.pubkey, i.color.as_deref()),
+                    signer,
+                    relays: agent.relays.clone(),
+                })
+            })
+            .collect();
+        list.sort_by_key(|i| i.pubkey != agent.home_pubkey);
+        Ok(list)
+    }
+
+    /// Approve on an agent's `gooti_create_identity`: a new Desktop only identity, in the agent's
+    /// scope at once (its connection starts at Ask every time). The outer `Err` is a vault
+    /// problem; the inner one goes to the agent. Answers with the identity as the list does.
+    pub fn bunker_create_identity_for(
+        &mut self,
+        ask: &Ask,
+    ) -> Result<std::result::Result<String, String>> {
+        let Some(new) = ask.details.new_identity.clone() else {
+            return Ok(Err("Missing nick.".into()));
+        };
+        if self
+            .unlocked()?
+            .data
+            .bunker
+            .agent(&ask.client_pubkey)
+            .is_none()
+        {
+            return Ok(Err("This agent is not connected any more.".into()));
+        }
+        let created = match self.add_identity_as(&new.nick, NewKey::Generate, Custody::Desktop) {
+            Ok(created) => created,
+            Err(error) => return Ok(Err(error.to_string())),
+        };
+        if let Some(color) = new.color.as_deref() {
+            self.set_identity_color(&created.id, Some(color))?;
+        }
+        Ok(self
+            .bunker_scoped_identities(&ask.client_pubkey)?
+            .into_iter()
+            .find(|i| i.pubkey == created.pubkey)
+            .map(|i| serde_json::to_string(&i).expect("an identity serializes"))
+            .ok_or_else(|| "The new identity is not in this agent's scope.".to_string()))
+    }
+
     pub fn bunker_revoke(&mut self, connection_id: &str) -> Result<()> {
         if self.connection(connection_id)?.browsers {
             return Err(Error::BrowsersConnection);
+        }
+        if self.connection(connection_id)?.agent {
+            return Err(Error::AgentConnection);
         }
         let bunker = &mut self.unlocked_mut()?.data.bunker;
         let at = bunker
@@ -794,7 +1095,23 @@ impl Vault {
             .map(|c| (app_name(c), c.id.clone()));
         // Read before handling: a logout removes the connection and its relays with it.
         // A new `bunker://` connection gets the bunker's relays either way.
-        let reply_relays = reply_relays_for(&data.bunker, &incoming, &identity_pubkey);
+        let reply_relays =
+            reply_relays_for(&data.bunker, &incoming.client_pubkey, &identity_pubkey);
+        if has_key
+            && !data.bunker.paused
+            && incoming.request.method.starts_with("gooti_")
+            && let Some(outcome) = self.gooti_method(&identity_pubkey, &signer, &incoming, now)
+        {
+            return Ok(Some(Handled {
+                outcome,
+                signer,
+                reply_relays,
+                client_pubkey: incoming.client_pubkey,
+                scheme: incoming.scheme,
+                connection_change: None,
+            }));
+        }
+        let data = &mut self.unlocked_mut()?.data;
         let (outcome, changed) = handler::handle(
             &mut data.bunker,
             &identity_pubkey,
@@ -834,6 +1151,7 @@ impl Vault {
         if self.unlocked()?.data.desktop_record.is_none() {
             // Without a desktop record there is nobody to tell about a logout.
             self.unlocked_mut()?.data.bunker.removed.clear();
+            self.unlocked_mut()?.data.bunker.removed_agents.clear();
         }
         if changed {
             self.save()?;
@@ -846,6 +1164,74 @@ impl Vault {
             scheme: incoming.scheme,
             connection_change,
         }))
+    }
+
+    /// Gooti's own methods, for AI agents only (gooti-mcp `docs/DESIGN.md`, "Version 2"). `None`
+    /// when the request is not one of them or not from an agent: the handler answers as for any app.
+    fn gooti_method(
+        &self,
+        identity_pubkey: &str,
+        signer: &Keys,
+        incoming: &super::message::Incoming,
+        now: i64,
+    ) -> Option<Outcome> {
+        let request = &incoming.request;
+        let bunker = &self.unlocked().ok()?.data.bunker;
+        let connection = bunker.connections.iter().find(|c| {
+            c.agent
+                && c.client_pubkey == incoming.client_pubkey
+                && c.identity_pubkey == identity_pubkey
+        })?;
+        let agent = bunker.agent(&incoming.client_pubkey)?;
+        let error = |code, text: &str| Outcome::Reply(Response::error(&request.id, code, text));
+        match request.method.as_str() {
+            GOOTI_LIST_IDENTITIES => {
+                let list = self.bunker_scoped_identities(&agent.client_pubkey).ok()?;
+                let json = serde_json::to_string(&list).expect("a list serializes");
+                Some(Outcome::Reply(Response::ok(&request.id, json)))
+            }
+            GOOTI_CREATE_IDENTITY => {
+                if agent.scope != AgentScope::DesktopOnly {
+                    return Some(error(
+                        ErrorCode::NotInScope,
+                        "This connection is for one identity only. Widen its scope in Gooti Desktop under Connections → AI agents.",
+                    ));
+                }
+                let nick = match request.params.first().map(|n| identity::normalize_nick(n)) {
+                    Some(Ok(nick)) => nick,
+                    _ => return Some(error(ErrorCode::InvalidParams, "Give the identity a nick.")),
+                };
+                let color = match request.params.get(1).filter(|c| !c.trim().is_empty()) {
+                    None => None,
+                    Some(color) => match identity::normalize_color(color) {
+                        Ok(color) => Some(color),
+                        Err(_) => {
+                            return Some(error(
+                                ErrorCode::InvalidParams,
+                                "The color must be a hex color such as #3b82f6.",
+                            ));
+                        }
+                    },
+                };
+                Some(Outcome::Ask(Box::new(Ask {
+                    key: uuid::Uuid::new_v4().to_string(),
+                    request_id: request.id.clone(),
+                    connection_id: connection.id.clone(),
+                    identity_pubkey: identity_pubkey.to_string(),
+                    client_pubkey: incoming.client_pubkey.clone(),
+                    signer_pubkey: signer.public_key().to_hex(),
+                    method: GOOTI_CREATE_IDENTITY.to_string(),
+                    params: request.params.clone(),
+                    scheme: incoming.scheme,
+                    received_at: now,
+                    details: AskDetails {
+                        new_identity: Some(NewIdentityAsk { nick, color }),
+                        ..AskDetails::default()
+                    },
+                })))
+            }
+            _ => None,
+        }
     }
 
     /// Runs an approved request. The outer `Err` is a vault problem; the inner one goes to the app.
@@ -916,14 +1302,11 @@ impl Vault {
         client_pubkey: &str,
         identity_pubkey: &str,
     ) -> Result<Vec<String>> {
-        let bunker = &self.unlocked()?.data.bunker;
-        Ok(bunker
-            .connections
-            .iter()
-            .find(|c| c.client_pubkey == client_pubkey && c.identity_pubkey == identity_pubkey)
-            .map(|c| handler::reply_relays(bunker, c))
-            // A browser that is not connected yet listens where the identity's pointer says.
-            .unwrap_or_else(|| handler::browser_relays(bunker, identity_pubkey)))
+        Ok(reply_relays_for(
+            &self.unlocked()?.data.bunker,
+            client_pubkey,
+            identity_pubkey,
+        ))
     }
 
     /// The public key of an identity this desktop can sign for.
@@ -994,6 +1377,34 @@ pub fn browser_pointer(
 }
 
 /// The app's own name, or the start of its key.
+/// The longest name an agent can be given here.
+pub const AGENT_NAME_MAX: usize = 80;
+
+/// The Desktop only identities this desktop holds the key of: what an agent's wider scope covers.
+pub(crate) fn desktop_only_pubkeys(identities: &[StoredIdentity]) -> Vec<String> {
+    identities
+        .iter()
+        .filter(|i| i.custody == Custody::Desktop && i.privkey.is_some())
+        .map(|i| i.pubkey.clone())
+        .collect()
+}
+
+/// The signer key (public, hex) an agent reaches this identity on: the one this desktop serves,
+/// else the first.
+fn served_signer(unlocked: &crate::vault::Unlocked, identity_pubkey: &str) -> Option<String> {
+    let signers = &unlocked.data.bunker.signers;
+    let of_identity = || {
+        signers
+            .iter()
+            .filter(|s| s.identity_pubkey == identity_pubkey)
+    };
+    of_identity()
+        .find(|s| s.served_by(&unlocked.data.desktop_id))
+        .or_else(|| of_identity().next())
+        .and_then(|s| keys_from_hex(&s.secret_hex).ok())
+        .map(|keys| keys.public_key().to_hex())
+}
+
 pub fn app_name(connection: &Connection) -> String {
     connection.name.clone().unwrap_or_else(|| {
         format!(
@@ -1003,17 +1414,34 @@ pub fn app_name(connection: &Connection) -> String {
     })
 }
 
+/// Where answers to `client_pubkey` go: its connection's relays. A client without one, such as a
+/// browser asking for the first time or an app that was disconnected, is answered on every relay
+/// the identity listens on: its browser relays and the relays of its apps. The request came in on
+/// one of them, so a removed app learns `not_connected` while the identity has other apps there.
 fn reply_relays_for(
     bunker: &super::state::BunkerData,
-    incoming: &Incoming,
+    client_pubkey: &str,
     identity_pubkey: &str,
 ) -> Vec<String> {
-    bunker
+    if let Some(connection) = bunker
         .connections
         .iter()
-        .find(|c| c.client_pubkey == incoming.client_pubkey && c.identity_pubkey == identity_pubkey)
-        .map(|c| handler::reply_relays(bunker, c))
-        .unwrap_or_else(|| handler::browser_relays(bunker, identity_pubkey))
+        .find(|c| c.client_pubkey == client_pubkey && c.identity_pubkey == identity_pubkey)
+    {
+        return handler::reply_relays(bunker, connection);
+    }
+    let mut relays = handler::browser_relays(bunker, identity_pubkey);
+    let apps = bunker
+        .connections
+        .iter()
+        .filter(|c| c.identity_pubkey == identity_pubkey)
+        .flat_map(|c| handler::app_relays(bunker, c).iter());
+    for relay in apps {
+        if !relays.contains(relay) {
+            relays.push(relay.clone());
+        }
+    }
+    relays
 }
 
 /// A waiting link's relays. Links made before 2026-11-12 named the default relays.
@@ -1318,6 +1746,7 @@ mod tests {
                 trust: Trust::Basic,
                 rules: Vec::new(),
                 browsers: true,
+                agent: false,
             });
         }
         vault.save().unwrap();
@@ -1334,6 +1763,40 @@ mod tests {
             .bunker_set_relays(&["wss://new.example".into()])
             .unwrap();
         assert_eq!(vault.bunker_info().unwrap().connections[0].relays, today);
+    }
+
+    #[test]
+    fn a_removed_app_is_answered_where_the_identitys_apps_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault(&dir);
+        vault
+            .bunker_set_relays(&["wss://default.relay".into()])
+            .unwrap();
+        let alice = vault.add_identity("Alice", NewKey::Generate).unwrap();
+        let connect = |vault: &mut Vault, app: &Keys| {
+            let link = format!(
+                "nostrconnect://{}?relay=wss%3A%2F%2Fmcp.relay&secret=s&name=Claude",
+                app.public_key().to_hex()
+            );
+            vault.bunker_accept_nostrconnect(&link, &alice.id).unwrap();
+        };
+        let (first, second) = (Keys::generate(), Keys::generate());
+        connect(&mut vault, &first);
+        connect(&mut vault, &second);
+        let first_id = vault.bunker_info().unwrap().connections[0].id.clone();
+        vault.bunker_revoke(&first_id).unwrap();
+
+        let removed = vault
+            .bunker_reply_relays(&first.public_key().to_hex(), &alice.pubkey)
+            .unwrap();
+        assert_eq!(removed, ["wss://default.relay", "wss://mcp.relay"]);
+        assert_eq!(
+            vault
+                .bunker_reply_relays(&second.public_key().to_hex(), &alice.pubkey)
+                .unwrap(),
+            ["wss://mcp.relay"],
+            "a connected app is answered on its own relays only"
+        );
     }
 
     #[test]
@@ -1361,6 +1824,313 @@ mod tests {
             vault.bunker_info().unwrap().connections[0].name.as_deref(),
             Some("Snort")
         );
+    }
+
+    fn agent_link(agent: &Keys) -> String {
+        format!(
+            "nostrconnect://{}?relay=wss%3A%2F%2Fagent.relay&secret=s1&name=Claude%20via%20Gooti%20MCP&gooti=agent",
+            agent.public_key().to_hex()
+        )
+    }
+
+    fn agent_nicks(vault: &Vault) -> Vec<String> {
+        vault.bunker_agents().unwrap()[0]
+            .identities
+            .iter()
+            .map(|i| i.nick.clone())
+            .collect()
+    }
+
+    fn ask_agent(
+        vault: &mut Vault,
+        agent: &Keys,
+        signer: &str,
+        method: &str,
+        params: &[&str],
+    ) -> Outcome {
+        let event = request_event(agent, signer, "r1", method, params, Scheme::Nip44);
+        vault
+            .bunker_handle(&event, time::now_ms())
+            .unwrap()
+            .unwrap()
+            .outcome
+    }
+
+    #[test]
+    fn an_agent_with_the_wide_scope_follows_the_desktop_only_identities() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault(&dir);
+        let alice = vault.add_identity("Alice", NewKey::Generate).unwrap();
+        let bob = vault.add_identity("Bob", NewKey::Generate).unwrap();
+        let work = vault
+            .add_identity_as("Work", NewKey::Generate, Custody::Desktop)
+            .unwrap();
+        let anon = vault
+            .add_identity_as("Anon", NewKey::Generate, Custody::Desktop)
+            .unwrap();
+        let agent = Keys::generate();
+        vault
+            .bunker_accept_nostrconnect_scoped(
+                &agent_link(&agent),
+                &alice.id,
+                AgentScope::DesktopOnly,
+            )
+            .unwrap();
+
+        // The home identity first, then every Desktop only one; not Bob.
+        let agents = vault.bunker_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "Claude via Gooti MCP");
+        assert_eq!(agents[0].home_nick.as_deref(), Some("Alice"));
+        assert_eq!(agent_nicks(&vault), ["Alice", "Anon", "Work"]);
+        let info = vault.bunker_info().unwrap();
+        assert!(
+            info.connections
+                .iter()
+                .all(|c| c.agent && c.trust == Trust::Ask)
+        );
+        assert!(!info.connections.iter().any(|c| c.identity_id == bob.id));
+        assert!(
+            vault
+                .bunker_listen()
+                .relays
+                .contains(&"wss://agent.relay".to_string())
+        );
+
+        // A new Desktop only identity joins; one that goes back to the browsers leaves; a
+        // deleted one is gone.
+        vault
+            .add_identity_as("Petra", NewKey::Generate, Custody::Desktop)
+            .unwrap();
+        assert_eq!(agent_nicks(&vault), ["Alice", "Anon", "Petra", "Work"]);
+        vault.set_custody(&work.id, Custody::Shared).unwrap();
+        vault.delete_identity(&anon.id).unwrap();
+        assert_eq!(agent_nicks(&vault), ["Alice", "Petra"]);
+
+        // Renamed here: the agent and each of its connections, so prompts show the new name.
+        let client = agent.public_key().to_hex();
+        assert!(matches!(
+            vault.bunker_rename_agent(&client, "   "),
+            Err(Error::AgentNameRequired)
+        ));
+        vault
+            .bunker_rename_agent(&client, "  Claude Code – laptop  ")
+            .unwrap();
+        assert_eq!(
+            vault.bunker_agents().unwrap()[0].name,
+            "Claude Code – laptop"
+        );
+        assert!(
+            vault
+                .bunker_info()
+                .unwrap()
+                .connections
+                .iter()
+                .all(|c| c.name.as_deref() == Some("Claude Code – laptop"))
+        );
+        vault
+            .bunker_rename_agent(&client, &"x".repeat(200))
+            .unwrap();
+        assert_eq!(vault.bunker_agents().unwrap()[0].name.len(), AGENT_NAME_MAX);
+        vault
+            .bunker_rename_agent(&client, "Claude Code – laptop")
+            .unwrap();
+        assert!(matches!(
+            vault.bunker_rename_agent(&"ab".repeat(32), "Other"),
+            Err(Error::AgentNotFound)
+        ));
+
+        // It survives a restart, and narrowing the scope leaves the home identity.
+        vault.lock();
+        vault.unlock("1234").unwrap();
+        assert_eq!(agent_nicks(&vault), ["Alice", "Petra"]);
+        vault
+            .bunker_set_agent_scope(&agent.public_key().to_hex(), AgentScope::Identity)
+            .unwrap();
+        assert_eq!(agent_nicks(&vault), ["Alice"]);
+        assert_eq!(vault.bunker_info().unwrap().connections.len(), 1);
+    }
+
+    #[test]
+    fn an_agent_lists_its_scope_and_is_disconnected_as_a_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault(&dir);
+        let alice = vault.add_identity("Alice", NewKey::Generate).unwrap();
+        vault.add_identity("Bob", NewKey::Generate).unwrap();
+        let work = vault
+            .add_identity_as("Work", NewKey::Generate, Custody::Desktop)
+            .unwrap();
+        let agent = Keys::generate();
+        let reply = vault
+            .bunker_accept_nostrconnect_scoped(
+                &agent_link(&agent),
+                &alice.id,
+                AgentScope::DesktopOnly,
+            )
+            .unwrap();
+        let home = reply.signer.public_key().to_hex();
+
+        let Outcome::Reply(listed) =
+            ask_agent(&mut vault, &agent, &home, GOOTI_LIST_IDENTITIES, &[])
+        else {
+            panic!("expected a reply")
+        };
+        let list: Vec<serde_json::Value> = serde_json::from_str(&listed.result).unwrap();
+        let nicks: Vec<&str> = list.iter().map(|i| i["nick"].as_str().unwrap()).collect();
+        assert_eq!(nicks, ["Alice", "Work"]);
+        assert_eq!(list[0]["signer"], home);
+        assert_eq!(list[0]["relays"], serde_json::json!(["wss://agent.relay"]));
+        assert_eq!(list[1]["pubkey"], work.pubkey);
+        assert!(list[1]["color"].as_str().unwrap().starts_with('#'));
+        let work_signer = list[1]["signer"].as_str().unwrap().to_string();
+        assert_ne!(
+            work_signer, work.pubkey,
+            "routed by the signer key, not the identity key"
+        );
+
+        // It signs as Work through Work's signer key, as any app would: Ask every time.
+        let template = r#"{"kind":1,"content":"Here am I","tags":[],"created_at":1}"#;
+        let Outcome::Ask(ask) =
+            ask_agent(&mut vault, &agent, &work_signer, "sign_event", &[template])
+        else {
+            panic!("an agent starts at Ask every time")
+        };
+        assert_eq!(ask.identity_pubkey, work.pubkey);
+
+        // Its connections are managed with the agent, not one by one.
+        let one = vault.bunker_info().unwrap().connections[0].id.clone();
+        assert!(matches!(
+            vault.bunker_revoke(&one),
+            Err(Error::AgentConnection)
+        ));
+
+        // A plain app gets no Gooti methods.
+        let app = Keys::generate();
+        vault
+            .bunker_accept_nostrconnect(
+                &format!(
+                    "nostrconnect://{}?relay=wss://r.example&secret=x",
+                    app.public_key().to_hex()
+                ),
+                &alice.id,
+            )
+            .unwrap();
+        let Outcome::Reply(refused) =
+            ask_agent(&mut vault, &app, &home, GOOTI_LIST_IDENTITIES, &[])
+        else {
+            panic!("expected a reply")
+        };
+        assert_eq!(refused.code, Some(ErrorCode::UnsupportedMethod));
+
+        vault
+            .bunker_disconnect_agent(&agent.public_key().to_hex())
+            .unwrap();
+        assert!(vault.bunker_agents().unwrap().is_empty());
+        let Outcome::Reply(gone) =
+            ask_agent(&mut vault, &agent, &work_signer, "get_public_key", &[])
+        else {
+            panic!("expected a reply")
+        };
+        assert_eq!(gone.code, Some(ErrorCode::NotConnected));
+    }
+
+    #[test]
+    fn an_agent_asks_before_it_creates_an_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = vault(&dir);
+        let alice = vault.add_identity("Alice", NewKey::Generate).unwrap();
+        let narrow = Keys::generate();
+        let reply = vault
+            .bunker_accept_nostrconnect_scoped(
+                &agent_link(&narrow),
+                &alice.id,
+                AgentScope::Identity,
+            )
+            .unwrap();
+        let home = reply.signer.public_key().to_hex();
+        let Outcome::Reply(refused) = ask_agent(
+            &mut vault,
+            &narrow,
+            &home,
+            GOOTI_CREATE_IDENTITY,
+            &["Petra", ""],
+        ) else {
+            panic!("expected a reply")
+        };
+        assert_eq!(refused.code, Some(ErrorCode::NotInScope));
+
+        let wide = Keys::generate();
+        let reply = vault
+            .bunker_accept_nostrconnect_scoped(
+                &agent_link(&wide),
+                &alice.id,
+                AgentScope::DesktopOnly,
+            )
+            .unwrap();
+        let home = reply.signer.public_key().to_hex();
+        let Outcome::Reply(bad) =
+            ask_agent(&mut vault, &wide, &home, GOOTI_CREATE_IDENTITY, &[" "])
+        else {
+            panic!("expected a reply")
+        };
+        assert_eq!(bad.code, Some(ErrorCode::InvalidParams));
+
+        // Even at full trust, a new identity is asked about.
+        let home_connection = vault
+            .bunker_agents()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.client_pubkey == wide.public_key().to_hex())
+            .unwrap()
+            .identities[0]
+            .connection_id
+            .clone();
+        vault
+            .bunker_set_trust(&home_connection, Trust::Trust)
+            .unwrap();
+        let Outcome::Ask(ask) = ask_agent(
+            &mut vault,
+            &wide,
+            &home,
+            GOOTI_CREATE_IDENTITY,
+            &["Petra", "#3B82F6"],
+        ) else {
+            panic!("a new identity always asks")
+        };
+        let new = ask.details.new_identity.clone().unwrap();
+        assert_eq!(
+            (new.nick.as_str(), new.color.as_deref()),
+            ("Petra", Some("#3b82f6"))
+        );
+
+        let created: serde_json::Value =
+            serde_json::from_str(&vault.bunker_create_identity_for(&ask).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(created["nick"], "Petra");
+        assert_eq!(created["color"], "#3b82f6");
+        let petra = vault
+            .identities()
+            .unwrap()
+            .into_iter()
+            .find(|i| i.nick == "Petra")
+            .unwrap();
+        assert_eq!(petra.custody, Custody::Desktop);
+        assert_eq!(created["pubkey"], petra.pubkey);
+        let wide_agent = vault
+            .bunker_agents()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.client_pubkey == wide.public_key().to_hex())
+            .unwrap();
+        assert!(wide_agent.identities.iter().any(|i| i.nick == "Petra"));
+        // The narrow agent does not see it.
+        let narrow_agent = vault
+            .bunker_agents()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.client_pubkey == narrow.public_key().to_hex())
+            .unwrap();
+        assert_eq!(narrow_agent.identities.len(), 1);
     }
 
     #[test]

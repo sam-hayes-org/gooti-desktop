@@ -8,7 +8,10 @@ use gooti_core::backup::phrase::generate_passphrase;
 use gooti_core::bunker::policy::{Remember, Trust};
 use gooti_core::bunker::pool::RelayStatus;
 use gooti_core::bunker::service::PendingAsk;
-use gooti_core::bunker::store::{BrowserList, BunkerInfo, ConnectionDetail, IdentityBrowsers};
+use gooti_core::bunker::state::AgentScope;
+use gooti_core::bunker::store::{
+    AgentInfo, BrowserList, BunkerInfo, ConnectionDetail, IdentityBrowsers,
+};
 use gooti_core::{
     AppSettingsChange, BackupInfo, Custody, IdentitySummary, LockSettingsChange, NewKey, Settings,
     VaultStatus,
@@ -516,16 +519,24 @@ pub fn connect_link_take(state: State<'_, AppState>) -> Option<String> {
     state.take_connect_link()
 }
 
-/// Connects the app behind a pasted `nostrconnect://` link.
+/// Connects the app behind a pasted `nostrconnect://` link. `scope` applies to an AI agent's
+/// link (Gooti MCP, `gooti=agent`); missing is "this identity only".
 #[tauri::command]
-pub fn bunker_connect(
+pub fn bunker_connect<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     link: String,
     identity_id: String,
+    scope: Option<AgentScope>,
 ) -> CommandResult<()> {
     state.touch();
     let bunker = state.bunker().ok_or(gooti_core::Error::Locked)?;
-    Ok(bunker.accept_nostrconnect(&link, &identity_id)?)
+    // Connecting can start a relay the bunker does not use yet: that needs the runtime.
+    crate::state::in_runtime(|| {
+        bunker.accept_nostrconnect_scoped(&link, &identity_id, scope.unwrap_or_default())
+    })?;
+    state.kick_backup(&app);
+    Ok(())
 }
 
 /// Approve or Reject, and how long to remember it: `once`, `fiveMinutes`, `oneHour`,
@@ -539,7 +550,10 @@ pub fn bunker_decide(
 ) -> CommandResult<bool> {
     state.touch();
     let bunker = state.bunker().ok_or(gooti_core::Error::Locked)?;
-    Ok(bunker.decide(&key, approve, remember)?)
+    // An answer can start a relay (a browser allowed, an AI agent's new identity): needs the runtime.
+    Ok(crate::state::in_runtime(|| {
+        bunker.decide(&key, approve, remember)
+    })?)
 }
 
 #[tauri::command]
@@ -594,6 +608,64 @@ pub fn bunker_revoke(state: State<'_, AppState>, connection_id: String) -> Comma
     state.gooti().vault_mut().bunker_revoke(&connection_id)?;
     state.refresh_bunker();
     Ok(())
+}
+
+/// "AI agents" in Connections.
+#[tauri::command]
+pub fn bunker_agents(state: State<'_, AppState>) -> CommandResult<Vec<AgentInfo>> {
+    Ok(state.gooti().vault().bunker_agents()?)
+}
+
+/// "Change scope" on an AI agent: its connections follow at once, on every Gooti Desktop.
+#[tauri::command]
+pub fn bunker_agent_set_scope<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    client_pubkey: String,
+    scope: AgentScope,
+) -> CommandResult<Vec<AgentInfo>> {
+    state.touch();
+    state
+        .gooti()
+        .vault_mut()
+        .bunker_set_agent_scope(&client_pubkey, scope)?;
+    state.refresh_bunker();
+    state.kick_backup(&app);
+    Ok(state.gooti().vault().bunker_agents()?)
+}
+
+/// "Rename" on an AI agent: the name Gooti shows for it, on every Gooti Desktop.
+#[tauri::command]
+pub fn bunker_agent_rename<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    client_pubkey: String,
+    name: String,
+) -> CommandResult<Vec<AgentInfo>> {
+    state.touch();
+    state
+        .gooti()
+        .vault_mut()
+        .bunker_rename_agent(&client_pubkey, &name)?;
+    state.kick_backup(&app);
+    Ok(state.gooti().vault().bunker_agents()?)
+}
+
+/// "Disconnect" on an AI agent: its key stops working for every identity, on every Gooti Desktop.
+#[tauri::command]
+pub fn bunker_agent_disconnect<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    client_pubkey: String,
+) -> CommandResult<Vec<AgentInfo>> {
+    state.touch();
+    state
+        .gooti()
+        .vault_mut()
+        .bunker_disconnect_agent(&client_pubkey)?;
+    state.refresh_bunker();
+    state.kick_backup(&app);
+    Ok(state.gooti().vault().bunker_agents()?)
 }
 
 /// "Browsers" in Connections: each browser with its own key, and the shared key while it works.

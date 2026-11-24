@@ -83,6 +83,14 @@ pub enum Error {
     BrowsersConnection,
     #[error("Only a Desktop only identity has browsers that sign through this desktop.")]
     NotDesktopOnly,
+    #[error(
+        "This connection belongs to an AI agent. Disconnect the agent under Connections → AI agents."
+    )]
+    AgentConnection,
+    #[error("This AI agent is not connected any more.")]
+    AgentNotFound,
+    #[error("Enter a name.")]
+    AgentNameRequired,
     #[error("The keychain is not available: {0}")]
     Keychain(String),
     #[error("Could not save: {0}")]
@@ -128,6 +136,9 @@ impl Error {
             Error::AppRelaysFixed => "app_relays_fixed",
             Error::BrowsersConnection => "browsers_connection",
             Error::NotDesktopOnly => "not_desktop_only",
+            Error::AgentConnection => "agent_connection",
+            Error::AgentNotFound => "agent_not_found",
+            Error::AgentNameRequired => "agent_name_required",
             Error::Keychain(_) => "keychain",
             Error::Io(_) => "io",
         }
